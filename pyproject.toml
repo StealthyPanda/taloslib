@@ -1,0 +1,38 @@
+[tool.poetry]
+name = "taloslib"
+version = "0.1.0"
+description = "A library to deal with ML-pipelines in robotics."
+authors = ["StealthyPanda <shaikm259@gmail.com>"]
+readme = "README.md"
+license = "MIT"
+include = [
+    { path = "LICENSE" },
+    { path = "README.md" }
+]
+
+
+
+[tool.poetry.dependencies]
+python = "^3.12"
+torch = "^2.4.1"
+codexregius = "^1.0.2"
+colorama = "^0.4.6"
+matplotlib = "^3.9.2"
+pandas = "^2.2.3"
+opencv-python = "^4.10.0.84"
+safetensors = "^0.4.5"
+
+[[tool.poetry.packages]]
+include = "talos"
+
+[tool.poetry.urls]
+homepage = "https://github.com/StealthyPanda/taloslib"
+
+[tool.poetry.group.dev.dependencies]
+colorama = "^0.4.6"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+

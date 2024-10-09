@@ -1,4 +1,6 @@
+
 import torch
+
 
 from codex import log, warning, error, ok
 
@@ -6,6 +8,8 @@ from codex import log, warning, error, ok
 
 Tensor = torch.Tensor
 tensor = torch.tensor
+
+talosdir = '.talos'
 
 
 
@@ -32,5 +36,17 @@ def gpu_exists() -> bool:
     else:
         warning('No GPUs found!')
     return False
+
+
+
+def disk_size(module : torch.nn.Module) -> int:
+    """Returns size of the model in bytes."""
+    allparams = module.parameters(recurse=True)
+    allbytes = 0
+    for param in allparams:
+        allbytes += (param.numel() * param.element_size())
+    return allbytes
+
+
 
 

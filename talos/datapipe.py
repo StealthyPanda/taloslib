@@ -13,12 +13,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 import cv2 as cv
-import pickle
 import torch
 import json
 
 from codex import ok, error, warning, log
+from .utils import talosdir
 
+from safetensors import numpy as stnp
+from safetensors import safe_open
 
 
 class Dataset:
@@ -41,8 +43,7 @@ class Dataset:
         self,
         path : str = '.',
         image_size : tuple[int, int] = (128, 128),
-        channels : int = 3
-    ) -> None:
+    ):
         """Creates a dataset, reading from files. Image files are assumed to be @ `./image_data` 
         and organised under `dataset_real_{dindex}` directories. CSV files are assumed to be @ `./csv_files` 
         and named `dataset_real_{dindex}.csv`. The images are normalised to 0.0 to 1.0.
@@ -71,14 +72,19 @@ class Dataset:
         
         n = len(os.listdir(data_path))
         self.metadata['samples'] = n
-        fulldatasetx = np.zeros((n, *image_size, channels), dtype=np.float32)
+        # fulldatasetx = np.zeros((n, *image_size, channels), dtype=np.float32)
         
+        fulldatasetx = []
         for each in range(n):
             print(f'\rReading image {each + 1}/{n}...', end='')
             ipath = os.path.join(data_path, f'{each}.png')
-            fulldatasetx[each] = cv.resize(plt.imread(ipath), dsize=image_size, interpolation=cv.INTER_LINEAR)
+            fulldatasetx.append(
+                cv.resize(plt.imread(ipath), dsize=image_size, interpolation=cv.INTER_LINEAR)
+            )
+        fulldatasetx = np.array(fulldatasetx)    
         
         joint_states = pd.read_csv(os.path.join(rootpath, 'joints.csv'))
+        joint_states.columns = list(map(lambda x:x.strip(), joint_states.columns))
         joint_positions = joint_states.loc[:, [f'joint_{i}_position' for i in range(7)]].to_numpy()
         joint_velocities = joint_states.loc[:, [f'joint_{i}_velocity' for i in range(7)]].to_numpy()
         
@@ -91,28 +97,59 @@ class Dataset:
         ok(f'Created dataset {self.name}!')
         
         self.metadata['size'] = image_size
+        
+        return self
     
-    def save(self, name_or_path : str) -> None:
+    
+    
+    def save(self, name_or_path : str = None) -> None:
         """Saves a dataset to disk."""
-        with open(f'{name_or_path}.rdata', 'wb') as file:
-            pickle.dump((self.metadata, (self.x_data, self.y_pos, self.y_vel)), file)
+        if name_or_path is None:
+            name_or_path = os.path.join(talosdir, 'datasets', self.name)
+        dirr = os.path.dirname(name_or_path)
+        if dirr: os.makedirs(dirr, exist_ok=True)
+        
+        meta = dict()
+        for key in self.metadata:
+            meta[key] = str(self.metadata[key])
+        
+        stnp.save_file({
+            'x_data' : self.x_data,
+            'y_pos' : self.y_pos,
+            'y_vel' : self.y_vel,
+        }, f'{name_or_path}.rdata', meta)
+        
+        
         print(f'Saved dataset {self.name} @ {name_or_path}.rdata')
 
-    def load(self, path : str, quiet : bool = False) -> None:
-        """Loads an existing pickled dataset."""
-        with open(path, 'rb') as file:
-            meta, (xs, ypos, yvel) = pickle.load(file)
+
+    def load(self, name : str = None, path : str = None, quiet : bool = False) -> None:
+        """Loads an existing saved dataset."""
+        
+        if path is not None: final = path
+        elif name is not None: final = f'{os.path.join(talosdir, 'datasets', name)}.rdata'
+            
+        with safe_open(final, framework='numpy') as file:
+            meta = file.metadata()
+        data = stnp.load_file(final)
+        xs = data['x_data']
+        yvel = data['y_vel']
+        ypos = data['y_pos']
+            
+                
         self.metadata = meta
         self.x_data = xs
         self.y_pos = ypos
         self.y_vel = yvel
         if 'name' in meta: self.name = meta['name']
-        if 'samples' in meta: self.samples = meta['samples']
+        if 'samples' in meta: self.samples = int(meta['samples'])
         else: self.samples = len(self.x_data)
         
         if not quiet:
             print(f'Loaded dataset {self.name}: ', end='')
             log(self.metadata)
+        
+        return self
         
     
     def _split(self, train_test_validation : tuple[int, int, int] = (7, 2, 1)) -> None:

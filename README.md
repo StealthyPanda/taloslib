@@ -9,12 +9,12 @@ To get started, clone this repository to your machine:
 git clone https://github.com/StealthyPanda/taloslib.git
 ```
 
-In the root directory of the package (`taloslib/talos`), run `pip install`:
+In the root directory of the package (`taloslib`), run `pip install`:
 
 > **_NOTE:_**  Make sure you have activated your desired python environment, if using virtual environments before running pip install.
 
 ```bash
-cd taloslib/talos
+cd taloslib
 pip install -e .
 ```
 
