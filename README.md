@@ -30,3 +30,5 @@ There are 3 main submodules:
 - `talos.models` : contains different model architectures, stuff for loading pretrain models etc.
 
 `talos.utils` contains general helpful stuff related to GPUs info etc.
+
+You can go through `example.ipynb` to get a more comprehensive tutorial.
