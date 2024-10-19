@@ -1,5 +1,6 @@
 
 import os
+from typing import Literal
 
 import torch.nn as nn
 
@@ -16,6 +17,7 @@ class TalosModule(nn.Module):
     n = 0
     def __init__(self, name : str = None, *args, **kwargs) -> None:
         self.name = name
+        self.frozen : None | Literal['all', 'immediate', 'all_but_immediate'] = None
         if name is None:
             self.name = f'module_{TalosModule.n}'
             TalosModule.n += 1
@@ -26,14 +28,40 @@ class TalosModule(nn.Module):
         n = sum(list(map(lambda x:x.numel(), self.parameters(recurse=True))))
         return n
 
-    def freeze(self, immediate_only : bool = False) -> None:
+    def freeze(self, immediate_only : bool = False):
         """Freezes the entire module's weights, including all sub-modules' as well.
+        You can check frozen status using `.frozen`.
 
         Args:
             immediate_only (bool, optional): If true, only immediate parameters of the module are frozen. Defaults to False.
         """
         for param in self.parameters(recurse = not immediate_only):
             param.requires_grad = False
+        self.frozen = 'immediate' if immediate_only else 'all'
+        
+        return self
+    
+    def unfreeze(self, immediate_only : bool = False):
+        """Unfreezes the entire module's weights, including all sub-modules' as well.
+        You can check frozen status using `.frozen`.
+
+        Args:
+            immediate_only (bool, optional): If true, only immediate parameters of the module are unfrozen. Defaults to False.
+        """
+        for param in self.parameters(recurse = not immediate_only):
+            param.requires_grad = True
+        
+        if self.frozen is not None:
+            if self.frozen == 'immediate':
+                self.frozen = None
+            elif self.frozen == 'all':
+                if immediate_only: self.frozen = 'all_but_immediate'
+                else: self.frozen = None
+            else:
+                if not immediate_only: self.frozen = None
+        
+        return self
+        
     
     def disk_size(self) -> int:
         """Returns size of the model in bytes."""
@@ -72,7 +100,22 @@ class TalosModule(nn.Module):
     def forward(self, x : Tensor) -> Tensor:
         return x
         
-        
-        
+
+def talosify(module : nn.Module) -> TalosModule:
+    """
+    > DONT USE THIS FOR NOW
+    
+    Converts a pytorch module to TalosModule.
+
+    Args:
+        module (nn.Module): model to convert.
+
+    Returns:
+        TalosModule: converted module.
+    """
+    module.__class__ = TalosModule
+    return module
+
+
 
 

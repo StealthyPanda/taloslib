@@ -40,30 +40,45 @@ class FFN(TalosModule):
 
 
 
-class UNetBlock(TalosModule):
+class UNetBlock3D(TalosModule):
     """The UNetBlock, basically a Convolution, Activation and then Pooling."""
-    def __init__(self, c_in : int, c_out : int = None, kernel_size : tuple[int, int] = (3, 3)):
+    def __init__(
+            self,
+            c_in : int, c_out : int,
+            kernel_size : tuple[int, int, int] = (3, 3, 3),
+            pool_size : tuple[int, int, int] = (2, 2, 2),
+            res_connection : bool = False
+        ):
         super().__init__()
         
         self.c_in = c_in
         self.c_out = c_out if c_out is not None else 2 * c_in
         self.kernel_size = kernel_size
+        self.rescon = res_connection
         
         self.conv = nn.Conv3d(
             in_channels=c_in,
             out_channels= c_out,
-            kernel_size=(*kernel_size, 3),
+            kernel_size=kernel_size,
             padding='same'
         )
         self.relu = nn.ReLU()
-        self.pool = nn.MaxPool3d((2, 2, 2))
+        self.pool = nn.MaxPool3d(pool_size)
         
     
     def forward(self, x : Tensor) -> Tensor:
         x # (b, c_in, t, x, y)
         
+        original = None
+        if self.rescon:
+            original = x
+        
         x = self.conv(x) # (b, c_out, t, x, y)
         x = self.relu(x) # (b, c_out, t, x, y)
+        
+        if self.rescon:
+            x = x + original
+        
         x = self.pool(x) # (b, c_out, t // 2, x // 2, y // 2)
         
         return x

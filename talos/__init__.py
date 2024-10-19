@@ -15,7 +15,7 @@ from . import utils
 from .utils import *
 from .datapipe import load_dataset, Dataset
 from .training import train
-from .models import TalosModule
+from .models import TalosModule, talosify
 
 
 
