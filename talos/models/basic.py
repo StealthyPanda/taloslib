@@ -11,17 +11,28 @@ from safetensors.torch import save_model, load_model
 modelsavesdir = os.path.join(talosdir, 'models')
 
 
+def _get_attr_name_for_submod(model : nn.Module, submod : nn.Module) -> str | None:
+    for name, layer in model.named_children():
+        if layer is submod: return name
+
+
+
 class TalosModule(nn.Module):
     """Better module than a simple nn.Module (which it subclasses), adding more functionality."""
     
     n = 0
     def __init__(self, name : str = None, *args, **kwargs) -> None:
         self.name = name
+        self.device = 'cpu'
         self.frozen : None | Literal['all', 'immediate', 'all_but_immediate'] = None
         if name is None:
             self.name = f'module_{TalosModule.n}'
             TalosModule.n += 1
         super().__init__(*args, **kwargs)
+    
+    def to(self, device, *args, **kargs):
+        self.device = device
+        return super().to(device, *args, **kargs)
     
     def nparams(self) -> int:
         """Returns all the params in this model."""
@@ -95,11 +106,48 @@ class TalosModule(nn.Module):
         """
         load_model(self, f'{os.path.join(modelsavesdir, name)}.model', strict = True)
         return self
+
+        
+    
+    def replace_layer_by_name(self, layer : str, new_module):
+        """Replaces a layer with another, given its fully qualified name.
+
+        Args:
+            layer (str): fully qualified name of the layer
+            new_module (TalosModule): module to replace with.
+        """
+        parent_module = self
+        parent_name = layer.split('.')
+        layer_name = parent_name[-1]
+        parent_name = '.'.join(parent_name[:-1])
+        
+        if parent_name: parent_module = self.get_submodule(parent_name)
+        
+        setattr(parent_module, layer_name, new_module)
+        
+        
+        return self
+    
+    def replace_layer(self, layer : int, new_module):
+        """Replaces a layer with another by index.
+
+        Args:
+            layer (int): index of the layer to replace.
+            new_module (TalosModule): module to replace with.
+        """
+        return self.replace_layer_by_name(self.layer_names[layer], new_module)
+    
+    @property
+    def layer_names(self) -> list[str]:
+        """Gives you all the fully qualified layer names of each of the layers in this module."""
+        return list(map(lambda x:x[0], self.named_modules()))
+    
     
     
     def forward(self, x : Tensor) -> Tensor:
         return x
-        
+
+
 
 def talosify(module : nn.Module) -> TalosModule:
     """

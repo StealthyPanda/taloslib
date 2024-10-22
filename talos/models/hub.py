@@ -2,6 +2,9 @@
 import os
 import warnings
 from typing import Any, Callable
+from codex import ok, warning, error
+
+import numpy as np
 
 import torch
 
@@ -52,15 +55,20 @@ class TorchHubModel(TalosModule):
         
         self.fetched = False
     
-    def fetch_model(self):
-        print(f'Fetching model... `{self.model_name}`')
+    def fetch_model(self, empty : bool = False):
+        """Fetches the model, either with or without weights.
+
+        Args:
+            empty (bool, optional): If true, only model architecture is loaded and not weights. Defaults to False.
+        """
+        warning(f'Fetching model... `{self.model_name}`')
         self.model = torch.hub.load(
-            self.url, self.model_name, pretrained=True, trust_repo=True
+            self.url, self.model_name, pretrained = not empty, trust_repo=True
         )
         if self.utils_name is not None:
             self.utils = torch.hub.load(self.url, self.utils_name, trust_repo=True)
         self.fetched = True
-        
+        ok(f'Model `{self.model_name}` fetched!')
         return self
     
     def forward(self, *inputs, **kinputs) -> Any:
@@ -69,5 +77,22 @@ class TorchHubModel(TalosModule):
 
 
 
-
+class IntelDepthModel(TorchHubModel):
+    
+    def __init__(self, name: str = None, *args, **kwargs) -> None:
+        super().__init__(
+            "intel-isl/MiDaS", 'MiDaS_small', 'transforms',
+            name, *args, **kwargs
+        )
+    
+    def fetch_model(self, empty: bool = False):
+        return super().fetch_model(empty).eval().freeze()
+    
+    def forward(self, image : np.ndarray) -> Any:
+        x = image
+        
+        x = self.utils.small_transform(x).to(self.device)
+        x = self.model(x)
+        
+        return x
 
