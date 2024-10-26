@@ -13,7 +13,7 @@ include = [
 
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = "^3.10"
 torch = "^2.4.1"
 codexregius = "^1.0.2"
 colorama = "^0.4.6"
