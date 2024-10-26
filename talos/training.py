@@ -69,6 +69,7 @@ train = ash_ketchum
 def misty(
         model : TalosModule,
         dataset : datapipe.Dataset,
+        epochs : int = 1,
         steps : int = 100,
         batch_size : int = 16,
         time_steps : int = 32,
@@ -94,36 +95,32 @@ def misty(
     if use_gpu: model = model.to('cuda')
 
     timeline = []
-    epoch = 0
-    while True:
-        print(f'Epoch {epoch + 1}/{int(dataset.samples / time_steps) + 1}:')
-        
-        bx, by = dataset.get_batch_new(batch_size=batch_size, time_steps=time_steps)
-        if len(bx) == 0: break
-        
-        if use_gpu:
-            bx = bx.to('cuda')
-            by = by.to('cuda')
-        
+    l = dataset.nbatches(batch_size=batch_size, time_steps=time_steps) 
+    for epoch in range(epochs):
+        print(f'Epoch {epoch+1}/{epochs}:')
         sub = []
-        for each in range(steps):
-            ycap = model(bx)
+        bi = 0
+        for xb, yb in dataset.get_batch(batch_size=batch_size, time_steps=time_steps):
+            print(f'\tBatch {bi + 1}/{l}:')
+            if use_gpu:
+                xb = xb.to('cuda')
+                yb = yb.to('cuda')
             
-            loss = loss_fn(ycap, by)
-            
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            
-            print(f'\r\tStep {each + 1}/{steps} : {loss.item():.5f}', end = '')
-            sub.append(loss.item())
-        print()
-        timeline += (sub)
-        epoch += 1
-        
+            for each in range(steps):
+                ycap = model(xb)
+                
+                loss = loss_fn(ycap, yb)
+                
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-    print('Misty has ended training!')
+                print(f'\r\t\tStep {each + 1}/{steps} : {loss.item():.5f}', end = '')
+                sub.append(loss.item())
+        timeline.append(sub)
+    
+    print(f'Misty has ended training model `{model.name}`!')
     return timeline
-
+    
 
 
