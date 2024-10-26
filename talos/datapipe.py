@@ -147,7 +147,7 @@ class Dataset:
         """Loads an existing saved dataset."""
         
         if path is not None: final = path
-        elif name is not None: final = f'{os.path.join(talosdir, 'datasets', name)}.rdata'
+        elif name is not None: final = f'{os.path.join(talosdir, "datasets", name)}.rdata'
             
         with safe_open(final, framework='numpy') as file:
             meta = file.metadata()
