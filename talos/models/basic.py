@@ -16,6 +16,52 @@ def _get_attr_name_for_submod(model : nn.Module, submod : nn.Module) -> str | No
         if layer is submod: return name
 
 
+def _get_hierarchy(module : nn.Module, recurse : bool = False) -> list[str]:
+    """Gets string representation of the hierarchical representation of this module. 
+    Best used for finding what is in the damn module.
+
+    Args:
+        module (nn.Module): module to traverse.
+
+    Returns:
+        list[str]: info about the module.
+    """
+    name = module._get_name()
+    device = None
+    if hasattr(module, 'device'):
+        device = module.device
+    info = f'{name}({type(module).__name__}{", " + str(device) if device is not None else ""})'
+    children = list(module.named_children())
+    if len(children) == 0: return [info]
+    
+    info = [info + ':']
+    
+    for name, child in children:
+        if not recurse: 
+            sub = [
+                f'    {name}({type(module).__name__}{", " + str(device) if device is not None else ""})'
+            ]
+        else:
+            sub = _get_hierarchy(child, recurse=True)
+            sub = list(map(lambda x: f'    |{x[1]}', enumerate(sub)))
+            sub[0] = f'    {name} -> {sub[0][5:]}'
+        info += sub
+
+    return info
+
+def get_arch(module : nn.Module, recurse : bool = False) -> list[str]:
+    """Gets string representation of the hierarchical representation of this module. 
+    Best used for finding what is in the damn module.
+
+    Args:
+        module (nn.Module): module to traverse.
+
+    Returns:
+        list[str]: info about the module.
+    """
+    return '\n'.join(_get_hierarchy(module, recurse))
+
+
 
 class TalosModule(nn.Module):
     """Better module than a simple nn.Module (which it subclasses), adding more functionality."""
@@ -32,12 +78,34 @@ class TalosModule(nn.Module):
     
     def to(self, device, *args, **kargs):
         self.device = device
+        for child in self.children(): child.to(device)
         return super().to(device, *args, **kargs)
+    
+    def arch(self, recurse : bool = False) -> str:
+        return get_arch(self, recurse=recurse)
+    
+    def __str__(self) -> str:
+        return self.arch()
     
     def nparams(self) -> int:
         """Returns all the params in this model."""
         n = sum(list(map(lambda x:x.numel(), self.parameters(recurse=True))))
         return n
+    
+    
+    def ntrainable_params(self) -> int:
+        n = sum(list(map(lambda x:x.numel(), filter(lambda x:x.requires_grad, self.parameters(recurse=True)) )))
+        return n
+    
+    @property
+    def size_info(self) -> str:
+        """Get size info about this model."""
+        nparams = self.nparams() / 1e6
+        ntrainable = self.ntrainable_params() / 1e6
+        disksize = self.disk_size()/1e6
+        return (
+            f'{nparams:.3f}M params, {ntrainable:.3f}M trainable params ({ntrainable * 100 / nparams:.1f}%), {disksize:.3f}MB total in memory'
+        )
 
     def freeze(self, immediate_only : bool = False):
         """Freezes the entire module's weights, including all sub-modules' as well.
@@ -143,9 +211,14 @@ class TalosModule(nn.Module):
         return list(map(lambda x:x[0], self.named_modules()))
     
     
-    
     def forward(self, x : Tensor) -> Tensor:
         return x
+
+
+# def get_children_names(module : nn.Module | TalosModule) -> list[str]:
+#     return list(map(lambda x:x[0], module.named_children()))
+    
+
 
 
 

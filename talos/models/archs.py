@@ -10,7 +10,7 @@ from ..utils import Tensor
 class FFN(TalosModule):
     """Good Old flat, Feed Forward Networks."""
     
-    def __init__(self, layers : list[int], activation = F.relu) -> None:
+    def __init__(self, layers : list[int], activation = F.relu, in_channels : int = None) -> None:
         """
         Args:
             layers (list[int]): list of ints, no. of cells in each layer. 
@@ -18,9 +18,10 @@ class FFN(TalosModule):
         """
         super().__init__()
         
-        self.layers = nn.ModuleList([nn.LazyLinear(layers[0])] + [
-            nn.Linear(layers[i - 1], each) for i, each in enumerate(layers) if i >= 1
-        ])
+        self.layers = nn.ModuleList(
+            [nn.LazyLinear(layers[0]) if in_channels is None else nn.Linear(in_channels, layers[0])] + 
+            [nn.Linear(layers[i - 1], each) for i, each in enumerate(layers) if i >= 1]
+        )
         self.outsize = layers[-1]
         
         self.activation = activation
@@ -103,7 +104,6 @@ class AttentionHead(TalosModule):
         self.key = nn.Linear(in_channels, head_size, bias = False)
         self.query = nn.Linear(in_channels, head_size, bias = False)
         self.value = nn.Linear(in_channels, head_size, bias = False)
-        # self.projector = nn.Linear(in_channels, head_size, bias = True)
         
         self.t = context_size
         self.hs = head_size
@@ -152,7 +152,7 @@ class ParallelAttentionHead(TalosModule):
                 AttentionHead(
                     in_channels=in_channels,
                     context_size=context_size,
-                    head_size = head_size // nheads,
+                    head_size = int(head_size / nheads),
                     droprate = droprate,
                 )
             )
@@ -164,11 +164,41 @@ class ParallelAttentionHead(TalosModule):
     
     def forward(self, x):
         x # b t c
-        # out = self.norm(x)
         out = torch.concat(list(map( lambda head : head(x), self.heads )), dim = -1)
         out = self.dropout(self.projector(out)) # b t c
-        # out = out + x
         return out
+
+
+
+
+class ParallelAttention(TalosModule):
+    def __init__(
+            self, 
+            in_channels : int,
+            context_size : int,
+            head_size : int,
+            nheads : int,
+            droprate : float = 0.2,
+            name: str = None, 
+            *args, **kwargs
+        ) -> None:
+        super().__init__(name, *args, **kwargs)
+        
+        self.aheads = nn.ModuleList([
+            AttentionHead(
+                in_channels=in_channels,
+                context_size=context_size,
+                head_size= head_size // nheads,
+                droprate = droprate,
+            ) for _ in range(nheads)
+        ])
+    
+    def forward(self, x: Tensor) -> Tensor:
+        x
+        subheads = list(map(lambda xhead:xhead(x), self.aheads))
+        head = torch.concat(subheads, -1)
+        return head
+
 
 
 
@@ -176,7 +206,7 @@ class ParallelAttentionHead(TalosModule):
 class AttentionFFN(FFN):
     """Attention FFN."""
     def __init__(self, in_channels : int, efactor : int = 4, droprate : float = 0.2):
-        super().__init__([in_channels * efactor, in_channels], F.relu)
+        super().__init__([in_channels * efactor, in_channels], [F.relu, lambda x:x], in_channels)
         self.dropper = nn.Dropout(droprate)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -199,7 +229,7 @@ class Block(TalosModule):
         ) -> None:
         super().__init__()
         
-        self.att = ParallelAttentionHead(
+        self.att = ParallelAttention(
             in_channels = in_channels,
             context_size= context_size,
             head_size = head_size,

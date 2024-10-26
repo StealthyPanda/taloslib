@@ -5,4 +5,4 @@ __pycache__
 *.pth
 .talos/
 !example.ipynb
-testing
+test*

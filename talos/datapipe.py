@@ -259,7 +259,7 @@ class Dataset:
             batch_size : int,
             time_steps : int = 32,
             split : Literal['train', 'test', 'valid'] = 'train',
-        ) -> tuple[torch.Tensor, torch.Tensor]:
+        ) -> tuple[torch.Tensor, torch.Tensor] | None:
         """Better batching than `.get_batch()`.
 
         Args:
@@ -290,7 +290,9 @@ class Dataset:
             index += 1
         self.batch_index = index
         
-        batchx = torch.tensor(np.array(batchx, dtype=np.float32).transpose((0, 4, 1, 2, 3)))
+        if len(batchx) == 0: return None
+        
+        batchx = torch.tensor(np.array(batchx, dtype=np.float32))
         batchy = torch.tensor(np.array(batchy, dtype=np.float32))
         
         return batchx, batchy
@@ -340,7 +342,7 @@ class Dataset:
         batchx = np.array(batchx)
         batchy = np.array(batchy)
         
-        batchx = np.transpose(batchx, (0, 4, 1, 2, 3))
+        # batchx = np.transpose(batchx, (0, 4, 1, 2, 3))
         
         batchx = torch.tensor(batchx, dtype=torch.float32)
         batchy = torch.tensor(batchy, dtype=torch.float32)

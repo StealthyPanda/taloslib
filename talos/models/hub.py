@@ -7,6 +7,7 @@ from codex import ok, warning, error
 import numpy as np
 
 import torch
+from torchvision import transforms
 
 from ..utils import Tensor
 from .basic import TalosModule, talosdir
@@ -78,12 +79,21 @@ class TorchHubModel(TalosModule):
 
 
 class IntelDepthModel(TorchHubModel):
-    
+    """Intel Depth Model MiDas, which can get depth info from a single monocular RGB image."""
     def __init__(self, name: str = None, *args, **kwargs) -> None:
         super().__init__(
             "intel-isl/MiDaS", 'MiDaS_small', 'transforms',
             name, *args, **kwargs
         )
+        self.custom_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Resize((256, 256)), 
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],  # MiDaS normalization values
+                std=[0.229, 0.224, 0.225]
+            ),
+        ])
+
     
     def fetch_model(self, empty: bool = False):
         return super().fetch_model(empty).eval().freeze()
@@ -91,8 +101,110 @@ class IntelDepthModel(TorchHubModel):
     def forward(self, image : np.ndarray) -> Any:
         x = image
         
-        x = self.utils.small_transform(x).to(self.device)
+        # x = self.utils.small_transform(x).to(self.device)
+        x = torch.stack(list(map(lambda img:self.custom_transform(img), x)))
+        
+        x = x.to(self.device)
         x = self.model(x)
         
         return x
 
+
+class IntelDepthFeatureExtractor(TalosModule):
+    """Uses the Intel Depth model MiDas for feature extraction. 
+    Features are of shape `(batch size, 128, 128)`."""
+    def __init__(self, name: str = None, *args, **kwargs) -> None:
+        super().__init__(name, *args, **kwargs)
+        
+        self.extractor = IntelDepthModel()
+
+    def load(self, name: str = None) -> None:
+        """Loads the feature extractor from either saved model or fetching from original source.
+
+        Args:
+            name (str, optional): model name to load from. Defaults to fetching from hub.
+        """
+        if name is None:
+            self.extractor.fetch_model()
+            self.extractor.model.scratch.output_conv = torch.nn.Identity()
+            return
+        self.extractor.fetch_model(empty=True)
+        self.extractor.model.scratch.output_conv = torch.nn.Identity()
+        return super().load(name)
+    
+    def forward(self, images: Tensor) -> Tensor:
+        """Returns features.
+
+        Args:
+            images (Tensor): must be of shape (batch size, height, width, channels)
+
+        Returns:
+            Tensor: features of shape `(batch size, 64, 128, 128)`
+        """
+        return self.extractor(images)
+
+
+
+class ResNetNVIDIA(TorchHubModel):
+    """Loads the base ResNet NVIDIA model, with its necssary transforms and stuff.
+    Input is cv2 images, not PIL.
+    """
+    def __init__(self, name: str = None, *args, **kwargs) -> None:
+        super().__init__(
+            "NVIDIA/DeepLearningExamples:torchhub", 'nvidia_resnet50',
+            'nvidia_convnets_processing_utils',
+            name, *args, **kwargs
+        )
+        self.trans = transforms.Compose([
+            # transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            transforms.Resize((224, 224)),
+        ])
+    
+    def fetch_model(self, empty: bool = False):
+        return super().fetch_model(empty).eval().freeze()
+    
+    def forward(self, image) -> Any:
+        x = image
+        
+        x = torch.stack(list(map(lambda img:self.trans(img), x)))
+        
+        x = self.model(x)
+        
+        return x
+
+
+class NVIDIAResNetFeatureExtractor(TalosModule):
+    """Uses the NVIDIA's resnet50 model for feature extraction. 
+    Features are of shape `(batch size, 2048)`."""
+    def __init__(self, name: str = None, *args, **kwargs) -> None:
+        super().__init__(name, *args, **kwargs)
+        
+        self.extractor = ResNetNVIDIA()
+        
+    
+    def load(self, name: str = None) -> None:
+        """Loads the feature extractor from either saved model or fetching from original source.
+
+        Args:
+            name (str, optional): model name to load from. Defaults to fetching from hub.
+        """
+        if name is None:
+            self.extractor.fetch_model()
+            self.extractor.model.fc = torch.nn.Identity()
+            return
+        self.extractor.fetch_model(empty=True)
+        self.extractor.model.fc = torch.nn.Identity()
+        return super().load(name)
+        
+    
+    def forward(self, images: Tensor) -> Tensor:
+        """Returns features.
+
+        Args:
+            images (Tensor): must be of shape (batch size, height, width, channels)
+
+        Returns:
+            Tensor: features of shape `(batch size, 2048)`
+        """
+        return self.extractor(images)
