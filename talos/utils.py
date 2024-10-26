@@ -9,7 +9,7 @@ from codex import log, warning, error, ok
 Tensor = torch.Tensor
 tensor = torch.tensor
 
-talosdir = '.talos'
+talosdir = 'kaggle_talos'
 
 
 
