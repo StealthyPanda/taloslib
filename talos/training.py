@@ -117,6 +117,8 @@ def misty(
 
                 print(f'\r\t\tStep {each + 1}/{steps} : {loss.item():.5f}', end = '')
                 sub.append(loss.item())
+            print()
+            bi += 1
         timeline.append(sub)
     
     print(f'Misty has ended training model `{model.name}`!')
