@@ -7,7 +7,8 @@ Contains useful functions for data creating, loading and saving stuff.
 """
 
 
-from typing import Literal
+from math import ceil
+from typing import Generator, Literal
 from random import randint
 
 import numpy as np
@@ -193,66 +194,74 @@ class Dataset:
         self.validationy = self.y_vel[trainlen + testlen:]
         
     
-    # def get_batch_new(
-    #         self,
-    #         samples : int = 4,
-    #         iterations : int = 4,
-    #         time_steps : int = 32,
-    #         include_only_last_y : bool = True,
-    #         split : Literal['train', 'test', 'valid'] = 'train',
-    #         non_zero_thresh : float = 1e-2
-    #     ) -> tuple[torch.Tensor, torch.Tensor]:
-    #     """Better batching than `.get_batch()`.
-
-    #     Args:
-    #         batch_size (int): batch size.
-    #         time_steps (int, optional): size of time window. Defaults to 32.
-    #         include_only_last_y (bool, optional): if true, only last y value for each sample is included in ybatch. Defaults to True.
-    #         split (Literal[&#39;train&#39;, &#39;test&#39;, &#39;valid&#39;], optional): which split to get batch from. Defaults to 'train'.
-    #         non_zero_thresh (float, optional): threshold over which a y is counted as non-zero. Defaults to 1e-2.
-
-    #     Returns:
-    #         tuple[torch.Tensor, torch.Tensor]: (x-batch, y-batch)
-    #     """
-    #     xs, ys = self.trainx, self.trainy
-    #     if split == 'test':
-    #         xs, ys = self.testx, self.testy
-    #     if split == 'valid':
-    #         xs, ys = self.validationx, self.validationy
-        
-    #     if self.mask[split] is None:
-    #         norms = (((ys ** 2).sum(-1) ** 0.5) / ys[0].size)
-    #         mask = norms > non_zero_thresh
-    #         print(mask.shape, mask)
-    #         self.mask[split] = mask
-        
-    #     if self.segments[split] is None:
-    #         segments = []
-    #         prev = 0
-    #         for i, each in enumerate(self.mask):
-    #             if i == (len(mask) - 1): continue
-                
-    #             if mask[i + 1] != each:
-    #                 segments.append((prev, i, each))
-    #                 prev = i
-    #         segments.append((prev, len(mask), mask[-1]))
-    #         print(segments)
-    #         self.segments[split] = segments
-        
-        
-    #     batchx, batchy = [], []
-    #     for _ in range(samples):
-    #         trues = list(filter(lambda x:x[-1], self.segments[split]))
-    #         sample_of_interest = trues[randint(0, len(trues) - 1)]
-    #         for each in range(iterations):
-    #             length = (sample_of_interest[1] - sample_of_interest[0])
-    #             if length >= time_steps:
-    #                 batchx.append(xs[sample_of_interest[0] : sample_of_interest[1]])
-    #                 batchy.append(ys[sample_of_interest[0] : sample_of_interest[1]])
+    def nbatches(
+            self, 
+            batch_size : int, 
+            time_steps : int,
+            split : Literal['train', 'test', 'valid'] = 'train',
+        ) -> int:
+        xs = self.trainx
+        if split == 'test':
+            xs = self.testx
+        if split == 'valid':
+            xs = self.validationx
             
+        return ceil((len(xs) - time_steps) / batch_size)
+    
+    
+    def get_batch_new_new(
+            self,
+            batch_size : int,
+            time_steps : int = 32,
+            split : Literal['train', 'test', 'valid'] = 'train',
+        ) -> Generator:
+        """Best possible batching I could come up with. Returns a generator using yield, 
+        and is supposed to be used like so:
+        
+        ```
+        for xb, yb in dataset.get_batch_new_new(16, 16):
+            xb = xb.to('cuda')
+            yb = yb.to('cuda')
+        
+            # Eg.
+            ycap = model(xb)
+
+        ```
+        
+
+        Args:
+            batch_size (int): no. of samples in the batch
+            time_steps (int, optional): size of context window. Defaults to 32.
+            split (Literal[&#39;train&#39;, &#39;test&#39;, &#39;valid&#39;], optional): which split to take samples from. Defaults to 'train'.
+
+        Yields:
+            xb, yb (tuple[torch.Tensor, torch.Tensor])
+        """
+        xs, ys = self.trainx, self.trainy
+        if split == 'test':
+            xs, ys = self.testx, self.testy
+        if split == 'valid':
+            xs, ys = self.validationx, self.validationy
+        
+        ix = 0
+        while (ix + time_steps) < len(xs):
+            batchx = []
+            batchy = []
+            for _ in range(min(batch_size, len(xs) - ix - time_steps)):                
+                batchx.append(xs[ix : ix + time_steps])
+                batchy.append(ys[ix + time_steps])
+                ix += 1
+            
+            batchx = torch.tensor(np.array(batchx, dtype=np.float32))
+            batchy = torch.tensor(np.array(batchy, dtype=np.float32))
+            
+            yield batchx, batchy
+        
+        return None
         
         
-    #     return xs, ys
+        
+        
     
     def get_batch_new(
             self,
@@ -284,7 +293,11 @@ class Dataset:
         index = self.batch_index
         batchx, batchy = [], []
         for _ in range(batch_size):
-            if (index + time_steps) >= (self.samples): break
+            if (index + time_steps) >= (self.samples):
+                batchx.append(xs[index : -1])
+                batchy.append(ys[-1])
+                self.batch_index = -1
+                break
             batchx.append(xs[index : index + time_steps])
             batchy.append(ys[index + time_steps])
             index += 1
@@ -320,7 +333,7 @@ class Dataset:
         Returns:
             tuple[torch.Tensor, torch.Tensor]: batch_x, batch_y
         
-        The shape of `xs` is (batch_dim, channels, time_window, height, width).
+        The shape of `xs` is (batch_dim, time_window, height, width, channels).
         
         The shape of `ys` is (batch_dim, no. of joints (7)).
         """

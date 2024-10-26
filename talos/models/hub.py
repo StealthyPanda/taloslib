@@ -183,12 +183,17 @@ class NVIDIAResNetFeatureExtractor(TalosModule):
         self.extractor = ResNetNVIDIA()
         
     
-    def load(self, name: str = None) -> None:
+    def load(self, name: str = None, empty : bool = False) -> None:
         """Loads the feature extractor from either saved model or fetching from original source.
 
         Args:
             name (str, optional): model name to load from. Defaults to fetching from hub.
+            empty (bool, optional): if true simply loads arch, no weights. Defaults to False.
         """
+        if empty:
+            self.extractor.fetch_model(empty=True)
+            self.extractor.model.fc = torch.nn.Identity()
+            return
         if name is None:
             self.extractor.fetch_model()
             self.extractor.model.fc = torch.nn.Identity()
