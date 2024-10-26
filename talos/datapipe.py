@@ -209,7 +209,7 @@ class Dataset:
         return ceil((len(xs) - time_steps) / batch_size)
     
     
-    def get_batch_new_new(
+    def get_batch(
             self,
             batch_size : int,
             time_steps : int = 32,
@@ -260,107 +260,7 @@ class Dataset:
         return None
         
         
-        
-        
     
-    def get_batch_new(
-            self,
-            batch_size : int,
-            time_steps : int = 32,
-            split : Literal['train', 'test', 'valid'] = 'train',
-        ) -> tuple[torch.Tensor, torch.Tensor] | None:
-        """Better batching than `.get_batch()`.
-
-        Args:
-            batch_size (int): batch size.
-            time_steps (int, optional): size of time window. Defaults to 32.
-            include_only_last_y (bool, optional): if true, only last y value for each sample is included in ybatch. Defaults to True.
-            split (Literal[&#39;train&#39;, &#39;test&#39;, &#39;valid&#39;], optional): which split to get batch from. Defaults to 'train'.
-            non_zero_thresh (float, optional): threshold over which a y is counted as non-zero. Defaults to 1e-2.
-
-        Returns:
-            tuple[torch.Tensor, torch.Tensor]: (x-batch, y-batch)
-        """
-        xs, ys = self.trainx, self.trainy
-        if split == 'test':
-            xs, ys = self.testx, self.testy
-        if split == 'valid':
-            xs, ys = self.validationx, self.validationy
-        
-        
-        if self.batch_index is None: self.batch_index = 0
-        
-        index = self.batch_index
-        batchx, batchy = [], []
-        for _ in range(batch_size):
-            if (index + time_steps) >= (self.samples):
-                batchx.append(xs[index : -1])
-                batchy.append(ys[-1])
-                self.batch_index = -1
-                break
-            batchx.append(xs[index : index + time_steps])
-            batchy.append(ys[index + time_steps])
-            index += 1
-        self.batch_index = index
-        
-        if len(batchx) == 0: return None
-        
-        batchx = torch.tensor(np.array(batchx, dtype=np.float32))
-        batchy = torch.tensor(np.array(batchy, dtype=np.float32))
-        
-        return batchx, batchy
-        
-        
-    
-    
-    
-    def get_batch(
-            self,
-            batch_size : int,
-            time_steps : int = 32,
-            include_only_last_y : bool = True,
-            split : Literal['train', 'test', 'valid'] = 'train',
-        ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Makes and returns a single batch, can be used when training. The batch will contain contiguous sequences from 
-        the x's and y's in the dataset. Make sure to call `.split()` to get train-test-validation splits before this.
-
-        Args:
-            batch_size (int): size of the batch
-            time_steps (int, optional): No. of contiguous x's (and y's depending on `include_only_last_y`) per datapoint in the batch. Defaults to 32.
-            include_only_last_y (int, optional): If True, only last y value is included per datapoint. Defaults to True.
-
-        Returns:
-            tuple[torch.Tensor, torch.Tensor]: batch_x, batch_y
-        
-        The shape of `xs` is (batch_dim, time_window, height, width, channels).
-        
-        The shape of `ys` is (batch_dim, no. of joints (7)).
-        """
-        batchx, batchy = [], []
-        xs, ys = self.trainx, self.trainy
-        if split == 'test':
-            xs, ys = self.testx, self.testy
-        if split == 'valid':
-            xs, ys = self.validationx, self.validationy
-        
-        indices = np.random.randint(0, len(xs) - time_steps, batch_size)
-        for each in range(batch_size):
-            batchx.append(xs[indices[each] : indices[each] + time_steps])
-            if include_only_last_y:
-                batchy.append(ys[indices[each] + time_steps - 1])
-            else:
-                batchy.append(ys[indices[each] : indices[each] + time_steps])
-        
-        batchx = np.array(batchx)
-        batchy = np.array(batchy)
-        
-        # batchx = np.transpose(batchx, (0, 4, 1, 2, 3))
-        
-        batchx = torch.tensor(batchx, dtype=torch.float32)
-        batchy = torch.tensor(batchy, dtype=torch.float32)
-        
-        return (batchx, batchy)
     
     def to(self, device : Literal['cuda', 'cpu']):
         """Moves all the data in the dataset to the specified device as pytorch tensors.
