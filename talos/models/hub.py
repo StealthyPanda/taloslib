@@ -141,7 +141,12 @@ class IntelDepthFeatureExtractor(TalosModule):
         Returns:
             Tensor: features of shape `(batch size, 64, 128, 128)`
         """
-        return self.extractor(images)
+        x = self.extractor(images) # b, n, h, w
+        
+        # x = torch.transpose(x, 1, 2) # b, h, n, w
+        # x = torch.transpose(x, 2, 3) # b, h, w, n
+        
+        return x
 
 
 
