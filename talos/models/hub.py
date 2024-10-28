@@ -118,12 +118,17 @@ class IntelDepthFeatureExtractor(TalosModule):
         
         self.extractor = IntelDepthModel()
 
-    def load(self, name: str = None) -> None:
+    def load(self, name: str = None, empty : bool = False) -> None:
         """Loads the feature extractor from either saved model or fetching from original source.
 
         Args:
             name (str, optional): model name to load from. Defaults to fetching from hub.
+            empty (bool, optional): if true simply loads arch, no weights. Defaults to False.
         """
+        if empty:
+            self.extractor.fetch_model(empty=True)
+            self.extractor.model.fc = torch.nn.Identity()
+            return
         if name is None:
             self.extractor.fetch_model()
             self.extractor.model.scratch.output_conv = torch.nn.Identity()
@@ -141,7 +146,12 @@ class IntelDepthFeatureExtractor(TalosModule):
         Returns:
             Tensor: features of shape `(batch size, 64, 128, 128)`
         """
-        return self.extractor(images)
+        x = self.extractor(images) # b, n, h, w
+        
+        # x = torch.transpose(x, 1, 2) # b, h, n, w
+        # x = torch.transpose(x, 2, 3) # b, h, w, n
+        
+        return x
 
 
 

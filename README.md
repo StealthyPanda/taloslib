@@ -1,6 +1,12 @@
 # Talos Library
 
+<p align="center">
+<img src="image.webp" align="center" alt="image" height="250em"/>
+
 Library for dealing with ML stuff for One-shot imitation learning.
+</p>
+
+
 
 ## Quick start
 
