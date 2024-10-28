@@ -60,7 +60,7 @@ class Attention(TalosModule):
             context_size (int): Size of context window.
             masked (bool, optional): Whether this attention is masked or not. \
                 You want this to be True if using self-attention (encoder) only architecture, or if \
-                this attention block is in decoder part of and encoder \
+                this attention block is in decoder part of an encoder \
                 decoder architecure (cross attention part). Defaults to True.
             droprate (float, optional): Dropout rate. Defaults to 0.2.
         """
@@ -131,16 +131,18 @@ class ParallelAttention(TalosModule):
             nheads (int) : No. of heads to use. Defaults to 4.
             masked (bool, optional): Whether this attention is masked or not. \
                 You want this to be True if using self-attention (encoder) only architecture, or if \
-                this attention block is in decoder part of and encoder \
+                this attention block is in decoder part of an encoder \
                 decoder architecure (cross attention part). Defaults to True.
             droprate (float, optional): Dropout rate. Defaults to 0.2.
         """
         super().__init__(name, *args, **kwargs)
         
+        self.size_per_head = head_size // nheads
+        
         self.heads = nn.ModuleList([
             Attention(
                 in_size=in_size,
-                head_size= head_size // nheads,
+                head_size= self.size_per_head,
                 context_size=context_size,
                 masked=masked,
                 droprate=droprate,
@@ -157,7 +159,15 @@ class ParallelAttention(TalosModule):
         ) -> Tensor:
         x #b, t, insize
         
-        x = list(map(lambda head: head(x, keys, queries, values), self.heads))
+        x = list(map(
+            lambda head: head[1](
+                    x, 
+                    keys[:, :, head[0]  * self.size_per_head : (head[0] + 1)  * self.size_per_head] if keys is not None else None,
+                    queries[:, :, head[0]  * self.size_per_head : (head[0] + 1)  * self.size_per_head] if queries is not None else None, 
+                    values[:, :, head[0]  * self.size_per_head : (head[0] + 1)  * self.size_per_head] if values is not None else None
+                ), 
+            enumerate(self.heads)
+        ))
         if keys is None:
             keys = list(map(lambda each : each[1], x))
             keys = torch.concat(keys, dim = -1)
@@ -202,7 +212,7 @@ class AttentionMultiDim(TalosModule):
             nheads (int) : No. of heads to use (make sure this is a divisor of total head size). Defaults to 4.
             masked (bool, optional): Whether this attention is masked or not. \
                 You want this to be True if using self-attention (encoder) only architecture, or if \
-                this attention block is in decoder part of and encoder \
+                this attention block is in decoder part of an encoder \
                 decoder architecure (cross attention part). Defaults to True.
             droprate (float, optional): Dropout rate. Defaults to 0.2.
         """
@@ -244,3 +254,145 @@ class AttentionMultiDim(TalosModule):
         v = torch.reshape(v, (v.shape[0], v.shape[1], *self.head_shape)) # b, t, *head_shape
         
         return x, k, q, v
+
+
+
+class AttentionMultiDimFFN(TalosModule):
+    
+    def __init__(
+            self, 
+            in_shape : tuple[int, ...],
+            efactor : int = 4,
+            name: str = None, *args, **kwargs
+        ) -> None:
+        """FFN with a single hidden layer, with a size of `efactor * input size`. \
+            Hidden state also goes through ReLU activation. Output shape is same as input shape.
+
+        Args:
+            in_shape (tuple[int, ...]): shape of inputs (not including batch and context dims)
+            efactor (int, optional): factor to multiply by, to get hidden state size. Defaults to 4.
+        """
+        super().__init__(name, *args, **kwargs)
+        
+        self.insize = reduce(lambda x,y : x*y, in_shape, 1)
+        self.inshape = in_shape
+        
+        self.ffn = nn.Sequential(
+            nn.Flatten(2),
+            nn.Linear(self.insize, int(self.insize * efactor)),
+            nn.ReLU(),
+            nn.Linear(int(self.insize * efactor), self.insize),
+        )
+        
+    def forward(self, x: Tensor) -> Tensor:
+        x
+        
+        inshape = x.shape
+        
+        x = self.ffn(x)
+        x = torch.reshape(x, inshape)
+        
+        return x
+
+
+
+
+class EncoderDecoderTransformerBlock(TalosModule):
+    """Implements an encoder-decoder block as shown in:
+    - https://arxiv.org/pdf/1706.03762
+    - https://sebastianraschka.com/blog/2023/self-attention-from-scratch.html
+    """
+    def __init__(
+            self,
+            embed_shape : tuple[int, ...],
+            context_size_encoder : int,  context_size_decoder : int, 
+            efactor : int = 4,
+            nheads : int = 4, droprate : float = 0.2,
+            name: str = None, *args, **kwargs
+        ) -> None:
+        """Creates a single encoder-decoder stackable block of a transformer. \
+            Contains LayerNorms and Residual connections. Implemented closely from \
+            https://arxiv.org/pdf/1706.03762 & https://sebastianraschka.com/blog/2023/self-attention-from-scratch.html
+        
+        
+        Args:
+            embed_shape (tuple[int, ...]): shape of the input and output embeddings
+            context_size_encoder (int): size of encoder context window
+            context_size_decoder (int): size of decoder context window
+            efactor (int, optional): `efactor` for the `AttentionMultiDimFFN`. Defaults to 4.
+            nheads (int, optional): no. of parallel heads. Defaults to 4.
+            droprate (float, optional): dropout rate. Defaults to 0.2.
+        """
+        super().__init__(name, *args, **kwargs)
+        
+        self.encoder_self_attention = AttentionMultiDim(
+            embed_shape=embed_shape,
+            head_shape=embed_shape,
+            context_size=context_size_encoder,
+            nheads=nheads, masked=False, droprate=droprate,
+            name = f'{self.name}_encoder_self_attention'
+        )
+        self.encoder_cross_attention = AttentionMultiDim(
+            embed_shape=embed_shape,
+            head_shape=embed_shape,
+            context_size=context_size_encoder,
+            nheads=nheads, masked=False, droprate=droprate,
+            name = f'{self.name}_encoder_cross_attention'
+        )
+        self.decoder_self_attention = AttentionMultiDim(
+            embed_shape=embed_shape,
+            head_shape=embed_shape,
+            context_size=context_size_decoder,
+            nheads=nheads, masked=True, droprate=droprate,
+            name = f'{self.name}_decoder_self_attention'
+        )
+        self.decoder_cross_attention = AttentionMultiDim(
+            embed_shape=embed_shape,
+            head_shape=embed_shape,
+            context_size=context_size_decoder,
+            nheads=nheads, masked=False, droprate=droprate,
+            name = f'{self.name}_decoder_cross_attention'
+        )
+        self.encoder_mlp = AttentionMultiDimFFN(
+            in_shape=embed_shape, efactor=efactor,
+            name=f'{self.name}_encoder_ffn'
+        )
+        self.decoder_mlp = AttentionMultiDimFFN(
+            in_shape=embed_shape, efactor=efactor,
+            name=f'{self.name}_decoder_ffn'
+        )
+        
+        
+        self.norm1 = nn.LayerNorm(embed_shape)
+        self.norm2 = nn.LayerNorm(embed_shape)
+        self.norm3 = nn.LayerNorm(embed_shape)
+        self.norm4 = nn.LayerNorm(embed_shape)
+        self.norm5 = nn.LayerNorm(embed_shape)
+        
+        
+    
+    def forward(self, x_enc: Tensor, x_dec : Tensor) -> Tensor:
+        x_enc 
+        x_dec
+        
+        enc_self_att, _, _, _ = self.encoder_self_attention(x_enc)
+        enc_self_att = self.norm1(enc_self_att + x_enc)
+        
+        enc_out = self.encoder_mlp(enc_self_att)
+        enc_out = self.norm2(enc_out + enc_self_att)
+        
+        _, k, _, v = self.encoder_cross_attention(enc_out)
+        
+        dec_self_att, _, _, _ = self.decoder_self_attention(x_dec)
+        dec_self_att = self.norm3(dec_self_att + x_dec)
+        
+        dec_cross_att, _, _, _ = self.decoder_cross_attention(dec_self_att, keys=k, values=v)
+        dec_cross_att = self.norm4(dec_cross_att + dec_self_att)
+        
+        dec_out = self.decoder_mlp(dec_cross_att)
+        dec_out = self.norm5(dec_out + dec_cross_att)
+        
+        return dec_out
+        
+
+
