@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from torchvision import transforms
 
-from ..utils import Tensor
+from ..utils import Tensor, ImageToTensor
 from .basic import TalosModule, talosdir
 
 
@@ -33,7 +33,8 @@ class TorchHubModel(TalosModule):
             url : str,
             model_name : str,
             utils_name : str | None = None, 
-            name: str = None, 
+            link : str | None = None,
+            name: str = None,
             *args, **kwargs
         ) -> None:
         """Loads a model from `torch.hub`. Model is loaded lazily; call `.fetch_model()` to actually 
@@ -43,6 +44,7 @@ class TorchHubModel(TalosModule):
             url (str): url to load from
             model_name (str): name of the model
             utils_name (str | None, optional): Optional utils to load from. Defaults to None.
+            link (str | None, optional): Link of the model info to reference from. Defaults to None.
         """
         
         super().__init__(name, *args, **kwargs)
@@ -50,6 +52,7 @@ class TorchHubModel(TalosModule):
         self.url = url
         self.model_name = model_name
         self.utils_name = utils_name
+        self.link = link
         
         self.model : TalosModule = None
         self.utils = None
@@ -70,6 +73,8 @@ class TorchHubModel(TalosModule):
             self.utils = torch.hub.load(self.url, self.utils_name, trust_repo=True)
         self.fetched = True
         ok(f'Model `{self.model_name}` fetched!')
+        if self.link is not None:
+            ok(f'Model reference @ {self.link}')
         return self
     
     def forward(self, *inputs, **kinputs) -> Any:
@@ -83,10 +88,11 @@ class IntelDepthModel(TorchHubModel):
     def __init__(self, name: str = None, *args, **kwargs) -> None:
         super().__init__(
             "intel-isl/MiDaS", 'MiDaS_small', 'transforms',
-            name, *args, **kwargs
+            link='https://pytorch.org/hub/intelisl_midas_v2/',
+            name=name, *args, **kwargs
         )
         self.custom_transform = transforms.Compose([
-            transforms.ToTensor(),
+            # ImageToTensor(),
             transforms.Resize((256, 256)), 
             transforms.Normalize(
                 mean=[0.485, 0.456, 0.406],  # MiDaS normalization values
@@ -103,6 +109,7 @@ class IntelDepthModel(TorchHubModel):
         
         # x = self.utils.small_transform(x).to(self.device)
         x = torch.stack(list(map(lambda img:self.custom_transform(img), x)))
+        # x = self.custom_transform(x)
         
         x = x.to(self.device)
         x = self.model(x)
@@ -156,14 +163,15 @@ class IntelDepthFeatureExtractor(TalosModule):
 
 
 class ResNetNVIDIA(TorchHubModel):
-    """Loads the base ResNet NVIDIA model, with its necssary transforms and stuff.
-    Input is cv2 images, not PIL.
+    """Loads the base ResNet NVIDIA model trained on semantic segmentation, \
+        with its necssary transforms and stuff. Input is cv2 images, not PIL.
     """
     def __init__(self, name: str = None, *args, **kwargs) -> None:
         super().__init__(
             "NVIDIA/DeepLearningExamples:torchhub", 'nvidia_resnet50',
             'nvidia_convnets_processing_utils',
-            name, *args, **kwargs
+            link='https://pytorch.org/hub/nvidia_deeplearningexamples_resnet50/',
+            name=name, *args, **kwargs
         )
         self.trans = transforms.Compose([
             # transforms.ToTensor(),
@@ -182,6 +190,69 @@ class ResNetNVIDIA(TorchHubModel):
         x = self.model(x)
         
         return x
+
+class FCNPyTorch(TorchHubModel):
+    """Loads FCN model trained by PyTorch for image segmentation. \
+        https://pytorch.org/hub/pytorch_vision_fcn_resnet101/
+    """
+    def __init__(self, name: str = None, *args, **kwargs) -> None:
+        super().__init__(
+            "pytorch/vision:v0.10.0", 'fcn_resnet101',
+            link='https://pytorch.org/hub/pytorch_vision_fcn_resnet101/',
+            name=name, *args, **kwargs
+        )
+        self.itt = ImageToTensor()
+        self.norm = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    
+    def fetch_model(self, empty: bool = False):
+        return super().fetch_model(empty).eval().freeze()
+    
+    def preprocess(self, images, **img_to_tensor_kwargs) -> torch.Tensor:
+        images = self.itt(images, **img_to_tensor_kwargs)
+        images = self.norm(images)
+        return images
+    
+    def forward(self, image, **img_to_tensor_kwargs) -> Any:
+        x = image
+        
+        x = self.preprocess(x, **img_to_tensor_kwargs)
+        x = self.model(x)
+        
+        return x
+
+
+
+
+class DeepLabV3PyTorch(TorchHubModel):
+    """Loads DeepLabV3 model trained by PyTorch for image segmentation. \
+        https://pytorch.org/hub/pytorch_vision_deeplabv3_resnet101/
+    """
+    def __init__(self, name: str = None, *args, **kwargs) -> None:
+        super().__init__(
+            "pytorch/vision:v0.10.0", 'deeplabv3_resnet50',
+            link='https://pytorch.org/hub/pytorch_vision_deeplabv3_resnet101/',
+            name=name, *args, **kwargs
+        )
+        self.itt = ImageToTensor()
+        self.norm = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    
+    def fetch_model(self, empty: bool = False):
+        return super().fetch_model(empty).eval().freeze()
+    
+    def preprocess(self, images, **img_to_tensor_kwargs) -> torch.Tensor:
+        images = self.itt(images, **img_to_tensor_kwargs)
+        images = self.norm(images)
+        return images
+    
+    def forward(self, image, **img_to_tensor_kwargs) -> Any:
+        x = image
+        
+        x = self.preprocess(x, **img_to_tensor_kwargs)
+        x = self.model(x)
+        
+        return x
+
+
 
 
 class NVIDIAResNetFeatureExtractor(TalosModule):
@@ -223,3 +294,7 @@ class NVIDIAResNetFeatureExtractor(TalosModule):
             Tensor: features of shape `(batch size, 2048)`
         """
         return self.extractor(images)
+
+
+
+

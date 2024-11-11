@@ -308,6 +308,7 @@ class EncoderDecoderTransformerBlock(TalosModule):
             context_size_encoder : int,  context_size_decoder : int, 
             efactor : int = 4,
             nheads : int = 4, droprate : float = 0.2,
+            all_unmasked : bool = False,
             name: str = None, *args, **kwargs
         ) -> None:
         """Creates a single encoder-decoder stackable block of a transformer. \
@@ -343,7 +344,7 @@ class EncoderDecoderTransformerBlock(TalosModule):
             embed_shape=embed_shape,
             head_shape=embed_shape,
             context_size=context_size_decoder,
-            nheads=nheads, masked=True, droprate=droprate,
+            nheads=nheads, masked=not all_unmasked, droprate=droprate,
             name = f'{self.name}_decoder_self_attention'
         )
         self.decoder_cross_attention = AttentionMultiDim(
@@ -393,6 +394,64 @@ class EncoderDecoderTransformerBlock(TalosModule):
         dec_out = self.norm5(dec_out + dec_cross_att)
         
         return dec_out
+        
+
+
+class SelfAttentionTransformerBlock(TalosModule):
+    
+    def __init__(
+            self, 
+            embed_shape : tuple[int, ...],
+            context_size : int,
+            efactor : int = 4,
+            nheads : int = 4, droprate : float = 0.2,
+            masked : bool = True,
+            name: str = None, *args, **kwargs
+        ) -> None:
+        """Self attention transformer block. Basically what you would use in LLMs etc. \
+            Contains LayerNorms and Residual connections. Stackable.
+
+        Args:
+            embed_shape (tuple[int, ...]): shape of embeddings
+            context_size (int): size of context window
+            efactor (int, optional): factor to multiply embed size with to get hidden state size. Defaults to 4.
+            nheads (int, optional): no. of parallel heads. Defaults to 4.
+            droprate (float, optional): dropout rate. Defaults to 0.2.
+        """
+        super().__init__(name, *args, **kwargs)
+        
+        self.attention = AttentionMultiDim(
+            embed_shape=embed_shape,
+            head_shape=embed_shape,
+            context_size=context_size,
+            nheads=nheads, masked=masked, droprate=droprate,
+            name=f'{self.name}_attention_block'
+        )
+        
+        self.ffn = AttentionMultiDimFFN(
+            in_shape=embed_shape, efactor=efactor,
+            name=f'{self.name}_ffn'
+        )
+        
+        self.norm1 = nn.LayerNorm(embed_shape)
+        self.norm2 = nn.LayerNorm(embed_shape)
+        self.dropper = nn.Dropout(droprate)
+    
+    
+    def forward(self, x: Tensor) -> Tensor:
+        x
+        
+        att, _, _, _ = self.attention(x)
+        x = self.norm1(att + x)
+        
+        out = self.ffn(x)
+        x = self.norm2(out + x)
+        
+        x = self.dropper(x)
+        
+        return x
+        
+        
         
 
 
