@@ -79,7 +79,7 @@ class Dataset:
                 config = json.load(file)
                 print('Config file:', end='')
                 log(config)
-            for key in ['rate', 'type', 'linear_vel', 'angular_vel']:
+            for key in ['target_rate', 'actual_rate', 'type', 'linear_vel', 'angular_vel']:
                 self.metadata[key] = config[key]
         else:
             warning(f'No config file found for @ {rootpath}...')
@@ -104,16 +104,21 @@ class Dataset:
             )
         fulldatasetx = np.array(fulldatasetx)    
         
-        joint_states = pd.read_csv(os.path.join(rootpath, 'joints.csv'))
-        joint_states.columns = list(map(lambda x:x.strip(), joint_states.columns))
-        joint_positions = joint_states.loc[:, [f'joint_{i}_position' for i in range(7)]].to_numpy()
-        joint_velocities = joint_states.loc[:, [f'joint_{i}_velocity' for i in range(7)]].to_numpy()
+        # joint_states = pd.read_csv(os.path.join(rootpath, 'joints.csv'))
+        # joint_states.columns = list(map(lambda x:x.strip(), joint_states.columns))
+        # joint_positions = joint_states.loc[:, [f'joint_{i}_position' for i in range(7)]].to_numpy()
+        # joint_velocities = joint_states.loc[:, [f'joint_{i}_velocity' for i in range(7)]].to_numpy()
         
-        gripper_states = pd.read_csv(os.path.join(rootpath, 'gripper.csv')).to_numpy()
+        # gripper_states = pd.read_csv(os.path.join(rootpath, 'gripper.csv')).to_numpy()
+        
+        twists = pd.read_csv(os.path.join(rootpath, 'control.csv'))
         
         self.x_data = fulldatasetx
-        self.y_pos = joint_positions #[: 2 * n : 2]
-        self.y_vel = joint_velocities #[: 2 * n : 2]
+        # self.y_pos = joint_positions #[: 2 * n : 2]
+        # self.y_vel = joint_velocities #[: 2 * n : 2]
+        self.y_lvel = twists.loc[:, ['lx', 'ly', 'lz']].to_numpy() / self.metadata['linear_vel']
+        self.y_avel = twists.loc[:, ['ax', 'ay', 'az']].to_numpy()/ self.metadata['angular_vel']
+        self.gripper = twists.loc[:, 'gripper'].to_numpy()
         print()
         ok(f'Created dataset {self.name}!')
         
@@ -136,8 +141,9 @@ class Dataset:
         
         stnp.save_file({
             'x_data' : self.x_data,
-            'y_pos' : self.y_pos,
-            'y_vel' : self.y_vel,
+            'y_lvel' : self.y_lvel,
+            'y_avel' : self.y_avel,
+            'gripper' : self.gripper
         }, f'{name_or_path}.rdata', meta)
         
         
@@ -154,14 +160,16 @@ class Dataset:
             meta = file.metadata()
         data = stnp.load_file(final)
         xs = data['x_data']
-        yvel = data['y_vel']
-        ypos = data['y_pos']
+        ylvel = data['y_lvel']
+        yavel = data['y_avel']
+        gripper = data['gripper']
             
                 
         self.metadata = meta
         self.x_data = xs
-        self.y_pos = ypos
-        self.y_vel = yvel
+        self.y_lvel = ylvel
+        self.y_avel = yavel
+        self.gripper = gripper
         if 'name' in meta: self.name = meta['name']
         if 'samples' in meta: self.samples = int(meta['samples'])
         else: self.samples = len(self.x_data)
@@ -189,9 +197,17 @@ class Dataset:
         self.testx = self.x_data[trainlen : trainlen + testlen]
         self.validationx = self.x_data[trainlen + testlen:]
         
-        self.trainy = self.y_vel[:trainlen]
-        self.testy = self.y_vel[trainlen : trainlen + testlen]
-        self.validationy = self.y_vel[trainlen + testlen:]
+        self.trainy_lvel = self.y_lvel[:trainlen]
+        self.testy_lvel = self.y_lvel[trainlen : trainlen + testlen]
+        self.validationy_lvel = self.y_lvel[trainlen + testlen:]
+        
+        self.trainy_avel = self.y_avel[:trainlen]
+        self.testy_avel = self.y_avel[trainlen : trainlen + testlen]
+        self.validationy_avel = self.y_avel[trainlen + testlen:]
+        
+        self.trainy_gripper = self.gripper[:trainlen]
+        self.testy_gripper = self.gripper[trainlen : trainlen + testlen]
+        self.validationy_gripper = self.gripper[trainlen + testlen:]
         
     
     def nbatches(
@@ -219,12 +235,14 @@ class Dataset:
         and is supposed to be used like so:
         
         ```
-        for xb, yb in dataset.get_batch_new_new(16, 16):
+        for xb, lyb, ayb, gyb in dataset.get_batch_new_new(16, 16):
             xb = xb.to('cuda')
-            yb = yb.to('cuda')
+            lyb = lyb.to('cuda')
+            ayb = ayb.to('cuda')
+            gyb = gyb.to('cuda')
         
             # Eg.
-            ycap = model(xb)
+            lycap, aycap = model(xb)
 
         ```
         
@@ -235,27 +253,33 @@ class Dataset:
             split (Literal[&#39;train&#39;, &#39;test&#39;, &#39;valid&#39;], optional): which split to take samples from. Defaults to 'train'.
 
         Yields:
-            xb, yb (tuple[torch.Tensor, torch.Tensor])
+            xb, lyb, ayb, gyb (tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor])
         """
-        xs, ys = self.trainx, self.trainy
+        xs, lys, ays, gys = self.trainx, self.trainy_lvel, self.trainy_avel, self.trainy_gripper
         if split == 'test':
-            xs, ys = self.testx, self.testy
+            xs, lys, ays, gys = self.testx, self.testy_lvel, self.testy_avel, self.testy_gripper
         if split == 'valid':
-            xs, ys = self.validationx, self.validationy
+            xs, lys, ays, gys = self.validationx, self.validationy_lvel, self.validationy_avel, self.validationy_gripper
         
         ix = 0
         while (ix + time_steps) < len(xs):
             batchx = []
-            batchy = []
+            batchly = []
+            batchay = []
+            batchgy = []
             for _ in range(min(batch_size, len(xs) - ix - time_steps)):                
                 batchx.append(xs[ix : ix + time_steps])
-                batchy.append(ys[ix + time_steps])
+                batchly.append(lys[ix + time_steps])
+                batchay.append(ays[ix + time_steps])
+                batchgy.append(gys[ix + time_steps])
                 ix += 1
             
             batchx = torch.tensor(np.array(batchx, dtype=np.float32))
-            batchy = torch.tensor(np.array(batchy, dtype=np.float32))
+            batchly = torch.tensor(np.array(batchly, dtype=np.float32))
+            batchay = torch.tensor(np.array(batchay, dtype=np.float32))
+            batchgy = torch.tensor(np.array(batchgy, dtype=np.float32))
             
-            yield batchx, batchy
+            yield batchx, batchly, batchay, batchgy
         
         return None
         
@@ -269,8 +293,9 @@ class Dataset:
             device (Literal[&#39;cuda&#39;, &#39;cpu&#39;]): target device.
         """
         self.x_data = torch.tensor(self.x_data, device=device)
-        self.y_vel = torch.tensor(self.y_vel, device=device)
-        self.y_pos = torch.tensor(self.y_pos, device=device)
+        self.y_lvel = torch.tensor(self.y_lvel, device=device)
+        self.y_avel = torch.tensor(self.y_avel, device=device)
+        self.gripper = torch.tensor(self.gripper, device=device)
         
         return self
 
