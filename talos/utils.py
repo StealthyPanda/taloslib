@@ -98,8 +98,9 @@ class ImageToTensor:
             allimgs = torch.tensor(images)
         
         
-        if batched: self.image_size = allimgs.shape[1:]
+        if self.batched: self.image_size = allimgs.shape[1:]
         else: self.image_size = allimgs.shape
+        
         
         if len(self.image_size) == 3:
             self.channels = self.image_size[-1]
