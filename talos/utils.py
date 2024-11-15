@@ -1,11 +1,14 @@
 
-from typing import Any
 
 import numpy as np
 import torch
+import pathlib
+import os
 
+
+
+from typing import Any
 from codex import log, warning, error, ok
-
 from PIL.Image import Image
 
 
@@ -65,11 +68,12 @@ class ImageToTensor:
     
     Related: `TensorToImage`.
     """
-    def __init__(self, batched : bool = True, cv2_img : bool = False) -> None:
+    def __init__(self, batched : bool = True, cv2_img : bool = False, scale : bool = True) -> None:
         self.batched : bool = batched
         self.cv2_img : bool = cv2_img
+        self.scale : bool = scale
     
-    def __call__(self, images : Any, batched : bool = None, cv2_img : bool = None) -> torch.Tensor:
+    def __call__(self, images : Any, batched : bool = None, cv2_img : bool = None, scale : bool = None) -> torch.Tensor:
         """Converts any image to Tensors.
 
         Args:
@@ -79,6 +83,7 @@ class ImageToTensor:
         """
         self.batched = batched if batched is not None else self.batched
         self.cv2_img = cv2_img if cv2_img is not None else self.cv2_img
+        self.scale = scale if scale is not None else self.scale
         
         allimgs = []
         
@@ -125,6 +130,9 @@ class ImageToTensor:
                     allimgs[:, 3:, :, :]
                 ), dim = 1)
         
+        if self.scale:
+            allimgs /= torch.max(allimgs)
+            
         return allimgs
 
 
@@ -163,3 +171,64 @@ class TensorToImage:
 
 
 
+
+class FileExtractor:
+    """
+    Recursively extracts file paths in given directory with given extentions.
+    You can use it just like a python list.
+    
+    Example usage:
+    
+    >>> txtfiles = FileExtractor()
+    >>> for each in txtfiles:
+    >>>     pass #do something with each 
+    
+    """
+    def __init__(self, root_dir : str | os.PathLike = '.') -> None:
+        """Recursively extracts file paths in given directory with given extentions.
+
+        Args:
+            root_dir (str | os.PathLike): directory to look in. Defaults to '.'.
+        """
+        self.root = pathlib.Path(root_dir)
+        self.file_paths = [file for file in self.root.rglob('*') if file.is_file()]
+    
+    def __len__(self) -> int:
+        return len(self.file_paths)
+    
+    def __getitem__(self, *index) -> os.PathLike:
+        return self.file_paths.__getitem__(*index)
+
+class ImageExtractor(FileExtractor):
+    """
+    Recursively extracts image file paths in given directory.
+    You can use it just like a python list.
+    
+    Example usage:
+    
+    >>> imgfiles = ImageExtractor()
+    >>> for each in imgfiles:
+    >>>     pass #do something with each 
+    
+    """
+    def __init__(
+            self, 
+            root_dir: str | os.PathLike = '.',
+            additional_image_formats : list[str] = None,
+        ) -> None:
+        """Recursively extracts image file paths in given directory.
+            You can use it just like a python list.
+
+        Args:
+            root_dir (str | os.PathLike, optional): directory to look in. Defaults to '.'.
+            additional_image_formats (list[str], optional): additional image formats to include. Default extentions are ['png', 'jpg', 'jpeg'].
+        """
+        super().__init__(root_dir)
+        self.image_formats = [
+            'png', 'jpg', 'jpeg'
+        ]
+        if additional_image_formats is not None: self.image_formats += additional_image_formats
+        self.file_paths = list(filter(
+            lambda x: os.path.basename(x).split('.')[1].lower() in self.image_formats, 
+            self.file_paths
+        ))
