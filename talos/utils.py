@@ -35,14 +35,14 @@ def gpu_info() -> None:
         )
 
 
-def gpu_exists() -> bool:
+def gpu_exists(verbose : bool = True) -> bool:
     """Returns true if GPU exists on this machine. Else, false."""
     
     if torch.cuda.device_count() > 0:
-        ok('GPU(s) exist!')
+        if verbose : ok('GPU(s) exist!')
         return True
     else:
-        warning('No GPUs found!')
+        if verbose : warning('No GPUs found!')
     return False
 
 
