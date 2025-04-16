@@ -62,6 +62,12 @@ def get_arch(module : nn.Module, recurse : bool = False) -> list[str]:
     return '\n'.join(_get_hierarchy(module, recurse))
 
 
+def move_to(module : nn.Module, device : str):
+    module.to(device)
+    if type(module) == nn.ModuleList:
+        for submod in module : move_to(submod, device)
+    
+
 
 class TalosModule(nn.Module):
     """Better module than a simple nn.Module (which it subclasses), adding more functionality."""
@@ -78,7 +84,11 @@ class TalosModule(nn.Module):
     
     def to(self, device, *args, **kargs):
         self.device = device
-        for child in self.children(): child.to(device)
+        for child in self.children():
+            # child.to(device)
+            # if type(child) == nn.ModuleList:
+            #     for each in 
+            move_to(child, device)
         return super().to(device, *args, **kargs)
     
     def arch(self, recurse : bool = False) -> str:
