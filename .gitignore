@@ -6,3 +6,5 @@ __pycache__
 .talos/
 !example.ipynb
 test*
+
+*.lock
