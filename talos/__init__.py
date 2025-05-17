@@ -9,7 +9,7 @@ A library to hold all robotics related DL implementations.
 
 from . import datapipe
 from . import models
-from . import training
+# from . import training
 from . import utils
 from . import layers
 

@@ -1,12 +1,16 @@
 
 import torch
 import torch.nn.functional as F
-import torch.utils.data.dataloader
-from torch.utils.tensorboard import SummaryWriter
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ImportError:
+    pass
+
+import numpy as np
 
 from .models import TalosModule
 from . import datapipe
-from .utils import gpu_exists
+from .utils import gpu_exists, gpu_info
 from .logs import logger
 
 from typing import Callable
@@ -283,6 +287,82 @@ def generic_train(
 train = generic_train
 
 
+
+def empirical_memory_analysis(
+        model : TalosModule,
+        input_shape : tuple[int, ...], dtype : torch.dtype, sample_target : torch.Tensor,
+        forward_fn : Callable[[TalosModule, torch.Tensor], torch.Tensor] = None,
+        loss_fn : Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
+        batches : list[int] = None, overhead : int = 0,
+    ) -> tuple[Callable[[int], int], np.ndarray[int], np.ndarray[int]]:
+    
+    assert gpu_exists(verbose=False), (
+        f'No GPU device found! Cannot perform analysis without GPU as of now...'
+    )
+    device = 'cuda:0'    
+    
+    if forward_fn is None:
+        forward_fn = lambda m, x: m(x)
+    if loss_fn is None:
+        loss_fn = lambda ycap, targs: ycap.sum() + targs.sum()
+    
+    model = model.to(device)
+    
+    mems = []
+    batches = [1, 2, 4, 6] if batches is None else batches
+    # for batch sizes 1, 2, 3
+    for b in batches:
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats(device)
+        
+        ishape = (b, *input_shape)
+        tx = torch.zeros(*ishape, dtype=dtype).to(device)
+        tycap = forward_fn(model, tx)
+        loss = loss_fn(tycap, sample_target)
+        loss.backward()
+        
+        mems.append(torch.cuda.max_memory_allocated(device) - overhead)
+    
+    # coeffs = np.polyfit(batches, mems, deg=1)
+    # predictor = lambda b: coeffs[0]*b + coeffs[1]
+    mems = np.array(mems)
+    batches = np.array(batches)
+    
+    print(batches)
+    print(mems)
+    
+    # dely = mems[1:] - mems[:-1]
+    # delx = batches[1:] - batches[:-1]
+    # slope = (dely / delx).mean().item()
+    # predictor = lambda b: slope * b
+    coeffs = np.polyfit(batches, mems, deg=2)
+    predictor = lambda b: (coeffs[0] * (b**2)) + (coeffs[1]*b) + coeffs[2]
+    # predictor = lambda b: (coeffs[0] * (b**2)) + (coeffs[0]*b) + coeffs[1]
+    
+    return predictor, batches, mems
+
+
+def get_optimizer_state_size(optimizer) -> tuple[int, int]:
+    """Gets the size of optimizer in bytes and no. of elements. Must have its state dict populated 
+    (either by `step`ping at least once or `zero_grad`ing at least once).
+
+    Args:
+        optimizer: the optimizer.
+
+    Returns:
+        tuple[int, int]: (bytes, elements)
+    """
+    total_bytes = 0
+    elems = 0
+    for state in optimizer.state.values():
+        for value in state.values():
+            if isinstance(value, torch.Tensor):
+                total_bytes += value.numel() * value.element_size()
+                elems += value.numel()
+    return total_bytes, elems
+
+
+
 class Trainer:
     
     def __init__(
@@ -328,6 +408,55 @@ class Trainer:
         self.device = 'cuda' if gpu_exists(False) else 'cpu'
         
         self.run = None
+        
+        self.predictor = None
+    
+    
+    def analyse_memory(
+            self,
+            input_shape : tuple[int, ...], dtype : torch.dtype,
+            forward_fn : Callable[[TalosModule, torch.Tensor], torch.Tensor] = None,
+            batches : list[int] = None,
+        ) -> tuple[np.ndarray[int], np.ndarray[int]]:
+        """Call this to to a memory requirement analysis on GPU for training.
+
+        Args:
+            input_shape (tuple[int, ...]): Shape of input tensors to model.
+            forward_fn (Callable[[TalosModule, torch.Tensor], torch.Tensor], optional): A custom way to call the forward in the model. 
+                Defaults to simple `model(input_tensor)`.
+        """
+        sample_targets = self.dataset[0][1]
+        self.optim.zero_grad()
+                
+        model_size = self.model.disk_size()
+        optim_size, _ = get_optimizer_state_size(self.optim)
+        
+        self.predictor, batches, mems = empirical_memory_analysis(
+            self.model,
+            input_shape, dtype, sample_targets, forward_fn, self.loss_fn, batches,
+            overhead = model_size + optim_size
+        )
+        
+        return batches, mems
+        
+    
+    def get_required_memory(self, batch_size : int) -> int:
+        """Calculates a rough estimate of GPU memory required as a function of batch_size for this training loop.
+
+        Args:
+            batch_size (int): Batch size.
+
+        Returns:
+            int: Memory required in bytes.
+        """
+        assert self.predictor is not None, (
+            'Call `analyse_memory` first!'
+        )
+        
+        return self.predictor(batch_size)
+    
+        
+    
     
     def train(self, epochs : int = 1, batch_size : int = None, loss_fn = None):
         

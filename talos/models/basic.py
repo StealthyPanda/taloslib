@@ -66,6 +66,8 @@ def move_to(module : nn.Module, device : str):
     module.to(device)
     if type(module) == nn.ModuleList:
         for submod in module : move_to(submod, device)
+    for child in module.children():
+        move_to(child, device)
     
 
 
@@ -223,6 +225,13 @@ class TalosModule(nn.Module):
     
     def forward(self, x : Tensor) -> Tensor:
         return x
+    
+    def tune(self, *args, **kwargs):
+        """Sets the model in fine-tune mode.
+        Optionally takes arguments. Override this in subclasses to do custom finetuning logic. 
+        By default does nothing.
+        """
+        return self
 
 
 # def get_children_names(module : nn.Module | TalosModule) -> list[str]:
