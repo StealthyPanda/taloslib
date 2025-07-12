@@ -3,8 +3,17 @@ import torch
 import torch.nn.functional as F
 try:
     from torch.utils.tensorboard import SummaryWriter
-except ImportError:
-    pass
+    tensorboard_exists = True
+except ImportError as e:
+    print(e)
+    print("WARNING: Tensorboard import failed, skipping...")
+    tensorboard_exists = False
+except AttributeError as e:
+    print(e)
+    print("WARNING: Tensorboard import failed, skipping...")
+    tensorboard_exists = False
+
+
 
 import numpy as np
 
@@ -13,7 +22,10 @@ from . import datapipe
 from .utils import gpu_exists, gpu_info
 from .logs import logger
 
-from typing import Callable
+from typing import Any, Callable
+if not tensorboard_exists:
+    class SummaryWriter:
+        pass
 
 import time, os
 
@@ -137,6 +149,7 @@ def misty(
     return timeline
     
 
+
 def generic_train(
         model : TalosModule,
         dataset : torch.utils.data.Dataset, testx = None, testy = None,
@@ -146,7 +159,7 @@ def generic_train(
         board : SummaryWriter = None,
         metrics : dict[str, Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
         i_mover : Callable = None, o_mover : Callable = None,
-        device : str = 'cpu',
+        device : str = 'cpu', checkpointing : bool = False
     ) -> dict[str, list]:
     """General training algorithm.
 
@@ -167,6 +180,7 @@ def generic_train(
         i_mover (Callable, optional): Function to move inputs to device. Use when non-simple inputs. Defaults to None.
         o_mover (Callable, optional): Function to move outputs to device. Use when non-simple outputs. Defaults to None.
         device (str, optional): Device to train on. Defaults to 'cpu'.
+        checkpointing (bool, optional): If `True`, saves model after each epoch.
 
     Returns:
         dict[str, list]: Train and test losses by default, and all additional metrics provided in `metrics`.
@@ -208,8 +222,6 @@ def generic_train(
         starttime = time.time()
         for bi, (inputs, outputs) in enumerate(dataloader):
             
-            # print(inputs.shape)
-            
             if i_mover: inputs = i_mover(inputs)
             else: inputs = inputs.to(device)
             
@@ -227,6 +239,8 @@ def generic_train(
             currtime = time.time()
             eta = (currtime - prevtime) * (nbatches - bi - 1)
             eta = time.strftime("%M:%S", time.gmtime(eta))
+            totaleta = (currtime - prevtime) * ((nbatches - bi - 1) + (nbatches * (epochs - ep)))
+            totaleta = time.strftime("%M:%S", time.gmtime(totaleta))
             prevtime = currtime
             elapsed = currtime - starttime
             elapsed = time.strftime("%M:%S", time.gmtime(elapsed))
@@ -236,7 +250,7 @@ def generic_train(
             )
             p = p[:K]
             print(
-                f'\rEpoch {ep:3} [{p}] loss {loss.item():.6f} ETA [{eta}] Elapsed [{elapsed}]',
+                f'\rEpoch {ep:3} [{p}] loss {loss.item():.6f} ETA [{eta}] Elapsed [{elapsed}] Training ETA [{totaleta}]',
                 end=''
             )
         
@@ -278,6 +292,9 @@ def generic_train(
                 board.add_scalar('Loss/test', testloss.item(), ep)
             for each in epmetrics:
                 board.add_scalar(f'{each}/test', epmetrics[each], ep)
+        
+        if checkpointing:
+            model.save(f'checkpoints/{model.name}_{ep}', quiet=True)
 
     return hist
 
@@ -374,6 +391,7 @@ class Trainer:
             pin_memory : bool = True,
             metrics : dict[str, Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
             i_mover : Callable = None, o_mover : Callable = None,
+            checkpoints : bool = False
         ):
         
         """
@@ -391,6 +409,7 @@ class Trainer:
             metrics (dict[str, Callable[[torch.Tensor, torch.Tensor], torch.Tensor]], optional): Additional metrics to track. Defaults to None.
             i_mover (Callable, optional): Function to move inputs to device. Use when non-simple inputs. Defaults to None.
             o_mover (Callable, optional): Function to move outputs to device. Use when non-simple outputs. Defaults to None.
+            checkpoints (bool, optional): If `True`, saves model after each epoch. Defaults to False.
         """
         self.model = model
         self.dataset = dataset
@@ -406,6 +425,7 @@ class Trainer:
         self.i_mover = i_mover
         self.o_mover = o_mover
         self.device = 'cuda' if gpu_exists(False) else 'cpu'
+        self.checkpoints = checkpoints
         
         self.run = None
         
@@ -473,8 +493,10 @@ class Trainer:
             else: self.run = 1
         
         boardname = f'.talos/runs/run_{self.run}'
-        board = SummaryWriter(boardname)
-        logger.info(f'Logging to {boardname}')
+        board = None
+        if tensorboard_exists:
+            board = SummaryWriter(boardname)
+            logger.info(f'Logging to {boardname}')
         
         hist = generic_train(
             self.model,
@@ -483,7 +505,7 @@ class Trainer:
             epochs, batch_size, self.shuffle,
             self.num_workers, self.pin_memory, board,
             self.metrics, self.i_mover, self.o_mover,
-            self.device
+            self.device, self.checkpoints
         )
         
         self.run += 1
