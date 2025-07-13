@@ -13,7 +13,7 @@ class LoRALinear(TalosModule):
     def __init__(
             self, 
             in_size : int, out_size : int, lrank : int = None,
-            bias : bool = True,
+            use_bias : bool = True,
             name = None, *args, **kwargs
         ):
         """
@@ -32,8 +32,8 @@ class LoRALinear(TalosModule):
         self.a = nn.Parameter(torch.randn( (in_size, lrank) ))
         self.b = nn.Parameter(torch.randn( (lrank, out_size) ))
         
-        self.bias = bias
-        if bias:
+        self.bias = use_bias
+        if self.bias:
             self.c = nn.Parameter(torch.zeros( (out_size, ) )) 
         
     

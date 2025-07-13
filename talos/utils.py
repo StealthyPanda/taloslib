@@ -19,6 +19,16 @@ talosdir = '.talos'
 
 
 
+def in_notebook():
+    try:
+        from IPython import get_ipython
+        shell = get_ipython().__class__.__name__
+        return shell == 'ZMQInteractiveShell'
+    except Exception:
+        return False
+
+
+
 def gpu_info() -> None:
     """Prints GPU related info. Use `gpu_exists()` to get a boolean."""
     

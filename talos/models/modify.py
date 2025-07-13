@@ -28,7 +28,7 @@ class Modification:
     >>> model = model.load('saved_model') # If the model was saved with modifications, it must be loaded after doing those same modifications.
     
     """
-    def forward(self,  module : TalosModule) -> TalosModule:
+    def forward(self, module : TalosModule) -> TalosModule:
         """Define your module modification logic here.
 
         Args:
@@ -55,12 +55,10 @@ class ReplaceWith(Modification):
         self.new_module = new_module
         self.index = index
         self.layer_name = layer_name
-        assert (
-            not ((index is None) and (layer_name is None)), 
+        assert not ((index is None) and (layer_name is None)) , ( 
             f'Need one of `index` or `layer_name`!'
         )
-        assert (
-            not (( not (index is None) ) and ( not (layer_name is None) )), 
+        assert not (( not (index is None) ) and ( not (layer_name is None) )), (
             f'Cannot use both `index` and `layer_name`!'
         )
     
