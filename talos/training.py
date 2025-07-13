@@ -169,7 +169,7 @@ def generic_train(
         board : summary_writer = None, # type: ignore
         metrics : dict[str, Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
         i_mover : Callable = None, o_mover : Callable = None,
-        device : str = 'cpu', checkpointing : bool = False,
+        device : str = 'cpu', checkpoints : Literal['last', 'all', None] = 'last',
         hooks : dict = None
     ) -> dict[str, list]:
     """General training algorithm.
@@ -191,7 +191,9 @@ def generic_train(
         i_mover (Callable, optional): Function to move inputs to device. Use when non-simple inputs. Defaults to None.
         o_mover (Callable, optional): Function to move outputs to device. Use when non-simple outputs. Defaults to None.
         device (str, optional): Device to train on. Defaults to 'cpu'.
-        checkpointing (bool, optional): If `True`, saves model after each epoch.
+        checkpoints (Literal[&#39;a&#39;, &#39;b&#39;, None], optional): If `'last'`, save only the last trained epoch's model weights. If `'all'`, all epoch's model weights are saved. If `None`, nothing is saved. Defaults to `'last'`.
+        hooks (dict, optional): Hooks for training. See `get_hook_dict`.
+        
 
     Returns:
         dict[str, list]: Train and test losses by default, and all additional metrics provided in `metrics`.
@@ -301,6 +303,9 @@ def generic_train(
                         epmetrics[f'{each}'] = metrics[each](testycap, testy)
         else: print()
         
+        if hooks is not None:
+            for hook in hooks['epoch']['after']:
+                hook(epoch=ep, model=model)
         
         if testexists:
             hist['test_loss'].append(testloss.item())
@@ -318,10 +323,32 @@ def generic_train(
             for each in epmetrics:
                 board.add_scalar(f'{each}/test', epmetrics[each], ep)
         
-        if checkpointing:
-            model.save(f'checkpoints/{model.name}_{ep}', quiet=True)
+        if checkpoints:
+            if checkpoints == 'all':
+                model.save(f'checkpoints/{model.name}_{ep}', quiet=True)
+            elif checkpoints == 'last':
+                model.save(f'checkpoints/{model.name}_latest', quiet=True)
 
     return hist
+
+
+
+def get_hook_dict() -> dict:
+    """
+    Returns a full dict format for running hooks. 
+    All hooks take 2 inputs: `(epoch / batch index, model)`. 
+    The only exception 'batch'->'after' hook, that additionally takes training loss at the end: `(epoch / batch index, model, loss)`.
+    """
+    return {
+        'epoch' : {
+            'before' : None,
+            'after' : None,
+        },
+        'batch' : {
+            'before' : None,
+            'after' : None,
+        },
+    }
 
 
 
