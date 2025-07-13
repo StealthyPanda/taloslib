@@ -1,4 +1,6 @@
 
+from typing import Callable
+
 import torch
 import torch.nn as nn
 
@@ -44,3 +46,20 @@ class LoRALinear(TalosModule):
         return x
 
 
+class Lambda(TalosModule):
+    """Turns a lambda function into a module. Useful for dropping into `nn.Sequential`."""
+    def __init__(self, fn : Callable, name = None, *args, **kwargs):
+        """Turns a lambda function into a module. 
+        Simply passes inputs to given function, and returns output.
+        Useful for dropping into `nn.Sequential`. 
+        Can be used for many things like hooks too.
+
+        Args:
+            fn (Callable): lambda expression, or any function.
+        """
+        super().__init__(name, *args, **kwargs)
+        
+        self.fn = fn
+
+    def forward(self, *args, **kwargs):
+        return self.fn(*args, **kwargs)

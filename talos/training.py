@@ -6,9 +6,17 @@ from typing import Any
 summary_writer = Any
 try:
     from torch.utils.tensorboard import SummaryWriter
-    summary_writer = SummaryWriter
-except ImportError:
-    pass
+    tensorboard_exists = True
+except ImportError as e:
+    print(e)
+    print("WARNING: Tensorboard import failed, skipping...")
+    tensorboard_exists = False
+except AttributeError as e:
+    print(e)
+    print("WARNING: Tensorboard import failed, skipping...")
+    tensorboard_exists = False
+
+
 
 import numpy as np
 
@@ -17,7 +25,10 @@ from . import datapipe
 from .utils import gpu_exists, gpu_info, in_notebook
 from .logs import logger
 
-from typing import Callable
+from typing import Any, Callable
+if not tensorboard_exists:
+    class SummaryWriter:
+        pass
 
 import time, os
 
@@ -148,6 +159,7 @@ def misty(
     return timeline
     
 
+
 def generic_train(
         model : TalosModule,
         dataset : torch.utils.data.Dataset, testx = None, testy = None,
@@ -157,7 +169,7 @@ def generic_train(
         board : summary_writer = None, # type: ignore
         metrics : dict[str, Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
         i_mover : Callable = None, o_mover : Callable = None,
-        device : str = 'cpu',
+        device : str = 'cpu', checkpointing : bool = False
         hooks : dict = None
     ) -> dict[str, list]:
     """General training algorithm.
@@ -179,6 +191,7 @@ def generic_train(
         i_mover (Callable, optional): Function to move inputs to device. Use when non-simple inputs. Defaults to None.
         o_mover (Callable, optional): Function to move outputs to device. Use when non-simple outputs. Defaults to None.
         device (str, optional): Device to train on. Defaults to 'cpu'.
+        checkpointing (bool, optional): If `True`, saves model after each epoch.
 
     Returns:
         dict[str, list]: Train and test losses by default, and all additional metrics provided in `metrics`.
@@ -247,6 +260,8 @@ def generic_train(
             currtime = time.time()
             eta = (currtime - prevtime) * (nbatches - bi - 1)
             eta = time.strftime("%M:%S", time.gmtime(eta))
+            totaleta = (currtime - prevtime) * ((nbatches - bi - 1) + (nbatches * (epochs - ep)))
+            totaleta = time.strftime("%M:%S", time.gmtime(totaleta))
             prevtime = currtime
             elapsed = currtime - starttime
             elapsed = time.strftime("%M:%S", time.gmtime(elapsed))
@@ -256,7 +271,7 @@ def generic_train(
             )
             p = p[:K]
             print(
-                f'\rEpoch {ep:3} [{p}] loss {loss.item():.6f} ETA [{eta}] Elapsed [{elapsed}]',
+                f'\rEpoch {ep:3} [{p}] loss {loss.item():.6f} ETA [{eta}] Elapsed [{elapsed}] Training ETA [{totaleta}]',
                 end=''
             )
             
@@ -286,9 +301,6 @@ def generic_train(
                         epmetrics[f'{each}'] = metrics[each](testycap, testy)
         else: print()
         
-        if hooks is not None:
-            for hook in hooks['epoch']['after']:
-                hook(epoch=ep, model=model)
         
         if testexists:
             hist['test_loss'].append(testloss.item())
@@ -305,178 +317,16 @@ def generic_train(
                 board.add_scalar('Loss/test', testloss.item(), ep)
             for each in epmetrics:
                 board.add_scalar(f'{each}/test', epmetrics[each], ep)
-
-    return hist
-
-
-def generic_train_tqdm(
-        model : TalosModule,
-        dataset : torch.utils.data.Dataset, testx = None, testy = None,
-        loss_fn = F.mse_loss, optim : torch.optim.Optimizer = None,
-        epochs : int = 1, batch_size : int = 32, shuffle : bool = True, num_workers : int = 0,
-        pin_memory : bool = True,
-        board : summary_writer = None, # type: ignore
-        metrics : dict[str, Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
-        i_mover : Callable = None, o_mover : Callable = None,
-        device : str = 'cpu',
-        hooks : dict = None
-    ) -> dict[str, list]:
-    """General training algorithm.
-
-    Args:
-        model (TalosModule): Model to train.
-        dataset (torch.utils.data.Dataset): Training dataset.
-        testx (_type_, optional): Test inputs. Defaults to None.
-        testy (_type_, optional): Test outputs. Defaults to None.
-        loss_fn (_type_, optional): Loss function. Defaults to F.mse_loss.
-        optim (torch.optim.Optimizer, optional): Optimizer for the model. Defaults to Adam.
-        epochs (int, optional): No. of epochs to train. Defaults to 1.
-        batch_size (int, optional): Batch size for training. Defaults to 32.
-        shuffle (bool, optional): Whether to shuffle the dataset each epoch. Defaults to True.
-        num_workers (int, optional): Parallel workers for loading batches. Leave this for now. Defaults to 0.
-        pin_memory (bool, optional): CUDA optimization. Leave this True for NVIDIA GPUs. Defaults to True.
-        board (SummaryWriter, optional): tensorboard for logging. Defaults to None.
-        metrics (dict[str, Callable[[torch.Tensor, torch.Tensor], torch.Tensor]], optional): Additional metrics to track. Defaults to None.
-        i_mover (Callable, optional): Function to move inputs to device. Use when non-simple inputs. Defaults to None.
-        o_mover (Callable, optional): Function to move outputs to device. Use when non-simple outputs. Defaults to None.
-        device (str, optional): Device to train on. Defaults to 'cpu'.
-
-    Returns:
-        dict[str, list]: Train and test losses by default, and all additional metrics provided in `metrics`.
-    """
-    
-    
-    logger.info(f'Training `{model.name}`')
-    
-    model = model.to(device)
-    
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        num_workers=num_workers,
-        pin_memory=pin_memory
-    )
-    
-    nbatches = len(dataloader)
-    N = len(dataset)
-    K = 30
-    
-    hist = {
-        'train_loss' : [],
-        'test_loss' : [],
-    }
-    
-    testexists = (testx is not None) and (testy is not None)
-    
-    
-    
-    for ep in range(epochs):
-        ep += 1
         
-        if hooks is not None:
-            for hook in hooks['epoch']['before']:
-                hook(epoch=ep, model=model)
-        
-        model.train()
-        
-        epmetrics = dict()
-        
-        
-        
-        prevtime = time.time()
-        starttime = time.time()
-        for bi, (inputs, outputs) in tqdm(enumerate(dataloader)):
-            if hooks is not None:
-                for hook in hooks['batch']['before']:
-                    hook(batch=bi, model=model)
-            
-            model = model.train()
-            # print(inputs.shape)
-            
-            if i_mover: inputs = i_mover(inputs, device=device)
-            else: inputs = inputs.to(device)
-            
-            if o_mover: outputs = o_mover(outputs, device=device)
-            else: outputs = outputs.to(device)
-            
-            ycap = model(inputs)
-            
-            loss : torch.Tensor = loss_fn(ycap, outputs)
-            
-            optim.zero_grad()
-            loss.backward()
-            optim.step()
-            
-            currtime = time.time()
-            eta = (currtime - prevtime) * (nbatches - bi - 1)
-            eta = time.strftime("%M:%S", time.gmtime(eta))
-            prevtime = currtime
-            elapsed = currtime - starttime
-            elapsed = time.strftime("%M:%S", time.gmtime(elapsed))
-            p = (
-                ('=' * int(bi * K / nbatches)) + 
-                '>' + (' ' * int((nbatches - bi) * K / nbatches))
-            )
-            p = p[:K]
-            
-            tqdm.write(f'\rEpoch {ep:3} loss {loss.item():.6f}', end='')
-            
-            if hooks is not None:
-                for hook in hooks['batch']['after']:
-                    hook(batch=bi, model=model, loss=loss.item())
-        
-        
-        if testexists:
-            model = model.eval()
-            testx = testx.to(device)
-            testy = testy.to(device)
-            
-            with torch.no_grad():
-                
-                testycap = model(testx)
-                testloss = loss_fn(testycap, testy)
-                
-                print(
-                    f'\rEpoch {ep:3} [{p}] loss {loss.item():.6f} ' + 
-                    f'test loss {testloss.item():.6f} ETA [{eta}] Elapsed [{elapsed}]',
-                )
-                
-                model.eval()
-                testycap = model(testx)
-                if metrics is not None:
-                    for each in metrics:
-                        epmetrics[f'{each}'] = metrics[each](testycap, testy)
-        else: print()
-        
-        if hooks is not None:
-            for hook in hooks['epoch']['after']:
-                hook(epoch=ep, model=model)
-        
-        
-        if testexists:
-            hist['test_loss'].append(testloss.item())
-        hist['train_loss'].append(loss.item())
-        for each in epmetrics:
-            if each in hist:
-                hist[each].append(epmetrics[each])
-            else:
-                hist[each] = [epmetrics[each]]
-        
-        if board is not None:
-            board.add_scalar('Loss/train', loss.item(), ep)
-            if testexists:
-                board.add_scalar('Loss/test', testloss.item(), ep)
-            for each in epmetrics:
-                board.add_scalar(f'{each}/test', epmetrics[each], ep)
+        if checkpointing:
+            model.save(f'checkpoints/{model.name}_{ep}', quiet=True)
 
     return hist
 
 
 
 
-
-train = generic_train_tqdm
+train = generic_train
 
 
 
@@ -566,6 +416,7 @@ class Trainer:
             pin_memory : bool = True,
             metrics : dict[str, Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
             i_mover : Callable = None, o_mover : Callable = None,
+            checkpoints : bool = False
         ):
         
         """
@@ -583,6 +434,7 @@ class Trainer:
             metrics (dict[str, Callable[[torch.Tensor, torch.Tensor], torch.Tensor]], optional): Additional metrics to track. Defaults to None.
             i_mover (Callable, optional): Function to move inputs to device. Use when non-simple inputs. Defaults to None.
             o_mover (Callable, optional): Function to move outputs to device. Use when non-simple outputs. Defaults to None.
+            checkpoints (bool, optional): If `True`, saves model after each epoch. Defaults to False.
         """
         self.model = model
         self.dataset = dataset
@@ -598,6 +450,7 @@ class Trainer:
         self.i_mover = i_mover
         self.o_mover = o_mover
         self.device = 'cuda' if gpu_exists(False) else 'cpu'
+        self.checkpoints = checkpoints
         
         self.run = None
         
@@ -682,8 +535,10 @@ class Trainer:
             else: self.run = 1
         
         boardname = f'.talos/runs/run_{self.run}'
-        board = SummaryWriter(boardname)
-        logger.info(f'Logging to {boardname}')
+        board = None
+        if tensorboard_exists:
+            board = SummaryWriter(boardname)
+            logger.info(f'Logging to {boardname}')
         
         hooks = {
             'epoch' : {
@@ -703,7 +558,7 @@ class Trainer:
             epochs, batch_size, self.shuffle,
             self.num_workers, self.pin_memory, board,
             self.metrics, self.i_mover, self.o_mover,
-            device, hooks
+            device, self.checkpoints, hooks
         )
         
         self.run += 1
