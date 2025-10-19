@@ -1,6 +1,7 @@
 
 import os
 from typing import Literal
+from deprecated import deprecated
 
 import torch.nn as nn
 
@@ -240,7 +241,7 @@ class TalosModule(nn.Module):
 
 
 
-
+@deprecated(reason='Not working yet')
 def talosify(module : nn.Module) -> TalosModule:
     """
     > DONT USE THIS FOR NOW

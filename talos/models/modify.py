@@ -28,7 +28,7 @@ class Modification:
     >>> model = model.load('saved_model') # If the model was saved with modifications, it must be loaded after doing those same modifications.
     
     """
-    def forward(self,  module : TalosModule) -> TalosModule:
+    def forward(self, module : TalosModule) -> TalosModule:
         """Define your module modification logic here.
 
         Args:
