@@ -55,12 +55,10 @@ class ReplaceWith(Modification):
         self.new_module = new_module
         self.index = index
         self.layer_name = layer_name
-        assert (
-            not ((index is None) and (layer_name is None)), 
+        assert not ((index is None) and (layer_name is None)), (
             f'Need one of `index` or `layer_name`!'
         )
-        assert (
-            not (( not (index is None) ) and ( not (layer_name is None) )), 
+        assert not (( not (index is None) ) and ( not (layer_name is None) )), (
             f'Cannot use both `index` and `layer_name`!'
         )
     
